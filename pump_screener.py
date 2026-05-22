@@ -7,10 +7,10 @@ from pybit.unified_trading import HTTP
 # =====================================================================
 # НАСТРОЙКИ БОТА (Впиши сюда свои данные заново)
 # =====================================================================
-API_KEY = "ТВОЙ_API_KEY"
-API_SECRET = "ТВОЙ_API_SECRET"
-TELEGRAM_TOKEN = "ТВОЙ_ТЕЛЕГРАМ_ТОКЕН"
-CHAT_ID = "ТВОЙ_CHAT_ID"
+API_KEY = ""
+API_SECRET = ""
+TELEGRAM_TOKEN = "8268691280:AAGhrZbF4okL7Yx08qm1sTXZI7azyQGA4zM"
+CHAT_ID = "5354904033"
 
 # Параметры триггеров
 LONG_TRIGGER = 2.5     # Изменение цены для Лонга (%)
