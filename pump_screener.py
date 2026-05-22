@@ -7,9 +7,9 @@ import threading
 TELEGRAM_TOKEN = "8268691280:AAGhrZbF4okL7Yx08qm1sTXZI7azyQGA4zM"
 CHAT_ID = "5354904033"
 
-LONG_TRIGGER = 2.5
-SHORT_TRIGGER = 4.0
-MIN_VOLUME_M = 0.5
+LONG_TRIGGER = 1.0
+SHORT_TRIGGER = 1.5
+MIN_VOLUME_M = 0.1
 CHAT_ID = "354415600"
 # МИНИ-СЕРВЕР ДЛЯ ОБМАНА RENDER (ОТВЕЧАЕТ НА ПОРТ 10000)
 class WebPortHandler(http.server.SimpleHTTPRequestHandler):
