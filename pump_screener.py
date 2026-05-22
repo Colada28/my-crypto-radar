@@ -1,38 +1,14 @@
 import time
 import requests
-import http.server
-import threading
 
 # НАСТРОЙКИ БОТА
 TELEGRAM_TOKEN = "8268691280:AAGhrZbF4okL7Yx08qm1sTXZI7azyQGA4zM"
 CHAT_ID = "5354904033"
 
-# Параметры триггеров
-LONG_TRIGGER = 2.5   # Изменение цены для Лонга (%)
-SHORT_TRIGGER = 4.0  # Изменение цены для Шорта (%)
-MIN_VOLUME_M = 0.5   # Минимальный объем в млн USDT (0.5М)
+LONG_TRIGGER = 2.5   # Памп (%)
+SHORT_TRIGGER = 4.0  # Дамп (%)
+MIN_VOLUME_M = 0.5   # Мин. объем в млн USDT
 
-# ВСТРОЕННЫЙ МИНИ ВЕБ-СЕРВЕР ДЛЯ ОБХОДА "СПЯЧКИ" RENDER
-class SimplePingHandler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/html; charset=utf-8")
-        self.end_headers()
-        self.wfile.write("Бот радар активен и работает!".encode("utf-8"))
-
-    def log_message(self, format, *args):
-        return
-
-def run_ping_server():
-    server_address = ('0.0.0.0', 10000)
-    httpd = http.server.HTTPServer(server_address, SimplePingHandler)
-    print("🌐 Внутренний веб-сервер запущен на порту 10000 для cron-job.org")
-    httpd.serve_forever()
-
-# Запускаем сервер пинга в фоновом потоке
-threading.Thread(target=run_ping_server, daemon=True).start()
-
-# ФУНКЦИИ ТЕЛЕГРАМА И ОТПРАВКИ АЛЕРТОВ
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}
@@ -40,24 +16,18 @@ def send_telegram_message(text):
         res = requests.post(url, json=payload)
         return res.status_code == 200
     except Exception as e:
-        print(f"Ошибка отправки в Telegram: {e}")
+        print(f"Ошибка Телеграма: {e}")
         return False
 
-# ОТПРАВКА СТАТУСА ПРИ СТАРТЕ
-send_telegram_message(
-    "🚀 *Бот-радар Bybit успешно запущен на Render!*\n\n"
-    f"🟢 Лонг (3М): +{LONG_TRIGGER}%\n"
-    f"🔴 Шорт (30М): +{SHORT_TRIGGER}%\n"
-    f"🔷 Мин. объем: {MIN_VOLUME_M}M USDT"
-)
+# СРАЗУ ПРОВЕРЯЕМ ОТПРАВКУ ПРИ СТАРТЕ
+print("Проверка связи с Телеграмом...")
+send_telegram_message("🚀 Бот-радар Bybit запущен напрямую без веб-сервера!")
 
-# ГЛАВНЫЙ ЦИКЛ СКАНИРОВАНИЯ BYBIT (БЕЗ API КЛЮЧЕЙ)
-print("🚀 Сканирование Bybit запущено...")
+print("🚀 Сканирование Bybit началось...")
 last_prices = {}
 
 while True:
     try:
-        # Получаем данные по всем тикерам через публичный API
         response = requests.get("https://api.bybit.com/v5/market/tickers?category=linear").json()
         if response.get("retCode") == 0:
             tickers = response["result"]["list"]
@@ -68,7 +38,7 @@ while True:
                     continue
                 
                 current_price = float(t["lastPrice"])
-                volume_24h = float(t["turnover24h"]) / 1_000_000  # Переводим в миллионы
+                volume_24h = float(t["turnover24h"]) / 1_000_000
                 
                 if volume_24h < MIN_VOLUME_M:
                     continue
@@ -85,6 +55,6 @@ while True:
                 last_prices[symbol] = current_price
                 
     except Exception as e:
-        print(f"Ошибка в цикле сканирования: {e}")
+        print(f"Ошибка сканирования: {e}")
         
-    time.sleep(10)  # Пауза 10 секунд между проверками
+    time.sleep(10)
