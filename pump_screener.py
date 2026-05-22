@@ -10,7 +10,7 @@ CHAT_ID = "5354904033"
 LONG_TRIGGER = 2.5
 SHORT_TRIGGER = 4.0
 MIN_VOLUME_M = 0.5
-
+CHAT_ID = "354415600"
 # МИНИ-СЕРВЕР ДЛЯ ОБМАНА RENDER (ОТВЕЧАЕТ НА ПОРТ 10000)
 class WebPortHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
