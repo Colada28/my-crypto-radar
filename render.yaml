@@ -3,4 +3,4 @@ services:
     name: bybit-screener-free
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python pump_screener.py
+    startCommand: python -u pump_screener.py
