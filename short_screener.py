@@ -84,7 +84,7 @@ def analyze_coin(symbol, current_price):
 
 def scan_market():
     """Основной цикл сканирования рынка"""
-    print("Запуск глобального сканирования рынка...")
+    print("Запуск глобального сканирования рынка BingX...")
     tickers = get_all_futures_symbols()
     
     for ticker in tickers:
@@ -127,4 +127,11 @@ def scan_market():
                 print(f"Не удалось отправить сообщение в ТГ: {e}")
 
 if __name__ == "__main__":
-    scan_market()
+    while True:
+        try:
+            scan_market()
+        except Exception as e:
+            print(f"Ошибка в цикле сканирования: {e}")
+            
+        print("Сканирование завершено. Засыпаю на 4 часа...")
+        time.sleep(14400)  # Пауза 4 часа между проверками рынка
