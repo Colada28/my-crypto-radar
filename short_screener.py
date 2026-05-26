@@ -1,4 +1,5 @@
 import time
+from datetime import datetime
 import requests
 import telebot
 
@@ -127,11 +128,14 @@ def scan_market():
                 print(f"Не удалось отправить сообщение в ТГ: {e}")
 
 if __name__ == "__main__":
-    while True:
+    current_hour = datetime.utcnow().hour
+    current_minute = datetime.utcnow().minute
+    
+    # Проверяем, делится ли текущий час на 4, и попали ли мы в первые 10 минут этого часа
+    if current_hour % 4 == 0 and current_minute < 10:
         try:
             scan_market()
         except Exception as e:
-            print(f"Ошибка в цикле сканирования: {e}")
-            
-        print("Сканирование завершено. Засыпаю на 4 часа...")
-        time.sleep(14400)  # Пауза 4 часа между проверками рынка
+            print(f"Ошибка при сканировании рынка: {e}")
+    else:
+        print(f"Пропуск сканирования BingX (Текущее время UTC: {current_hour:02d}:{current_minute:02d}). Ждем плановый час.")
