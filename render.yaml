@@ -4,10 +4,8 @@ services:
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python -u pump_screener.py
-  - type: cron
+  - type: worker
     name: bingx-short-screener
     runtime: python
-    plan: free
-    schedule: "0 */4 * * *"
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python -u short_screener.py"   
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -u short_screener.py   
