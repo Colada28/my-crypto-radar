@@ -10,8 +10,8 @@ CHAT_ID = "-1003714825454"
 BINGX_URL = "https://open-api.bingx.com"
 
 # МИНИМАЛЬНЫЙ ПОРОГ ЛИКВИДНОСТИ
-MIN_VOLUME_24H = 5000000  # От $5,000,000 объема за сутки
-MIN_LIQ_AMOUNT = 15000    # Ликвидация от $15,000 за одну свечу
+MIN_VOLUME_24H = 1000000  # От $1,000,000 объема за сутки
+MIN_LIQ_AMOUNT = 3000    # Ликвидация от $3,000 за одну свечу
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
