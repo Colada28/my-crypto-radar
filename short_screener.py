@@ -2,10 +2,15 @@ import time
 from datetime import datetime
 import requests
 import telebot
+import http.server
+import threading
 
 # --- НАСТРОЙКИ ---
 # Токен золотого бота (BingX Global Short Screener)
 TELEGRAM_TOKEN = "8834450636:AAH0vH2ayzopTG2atZEezEa5PWkvKMV_Sxs"
+
+# Жестко прописанный рабочий CHAT_ID из твоего pump_screener.py
+DYNAMIC_CHAT_ID = "354415600"
 
 BYBIT_URL = "https://api.bybit.com"
 
@@ -14,24 +19,27 @@ MIN_VOLUME_24H = 1000000  # От $1,000,000 объема за сутки
 MIN_LIQ_AMOUNT = 3000     # Триггер: ликвидация от $3,000 за один ордер
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
-DYNAMIC_CHAT_ID = None
 
-def discover_chat_id():
-    """Автоматически находит ID канала, где бот состоит в админах"""
-    global DYNAMIC_CHAT_ID
-    print("🤖 Попытка автоопределения ID канала...", flush=True)
+# --- МИНИ-СЕРВЕР ДЛЯ ОБМАНА RENDER (ОТВЕЧАЕТ НА ПОРТ 10000) ---
+class WebPortHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write("OK".encode("utf-8"))
+    def log_message(self, format, *args):
+        return
+
+def start_render_port():
     try:
-        updates = bot.get_updates(timeout=5, allowed_updates=["my_chat_member"])
-        for update in updates:
-            if update.my_chat_member and update.my_chat_member.chat:
-                DYNAMIC_CHAT_ID = str(update.my_chat_member.chat.id)
-                print(f"✅ Успешно найден ID канала: {DYNAMIC_CHAT_ID} (Имя: {update.my_chat_member.chat.title})", flush=True)
-                return
+        # Используем порт 10000, Render будет доволен
+        server = http.server.HTTPServer(('0.0.0.0', 10000), WebPortHandler)
+        server.serve_forever()
     except Exception as e:
-        print(f"ℹ️ Запрос обновлений: {e}", flush=True)
-    
-    if not DYNAMIC_CHAT_ID:
-        DYNAMIC_CHAT_ID = "-1003714825454" 
+        print(f"Ошибка сервера портов: {e}", flush=True)
+
+# Запуск порта в отдельном независимом потоке
+threading.Thread(target=start_render_port, daemon=True).start()
 
 def get_active_futures():
     """Получает активные пары с Bybit для фильтрации по объему"""
@@ -53,7 +61,7 @@ def get_active_futures():
                             }
                 return valid_symbols
     except Exception as e:
-        print(f"Ошибка получения объемов Bybit: {e}", flush=True)
+        pass
     return {}
 
 def check_bybit_liquidations(active_coins):
@@ -87,14 +95,10 @@ def check_bybit_liquidations(active_coins):
                 time.sleep(1)
                 
     except Exception as e:
-        print(f"Ошибка парсинга ленты Bybit: {e}", flush=True)
+        pass
 
 def send_alert(symbol, side, amount_usd, price, vol24h):
     """Форматирует и отправляет сообщение в Телеграм"""
-    global DYNAMIC_CHAT_ID
-    if not DYNAMIC_CHAT_ID:
-        return
-
     if side in ["Sell", "SELL"]:
         emoji = "🩸 **КРУПНЫЙ СБРОС / ЛОНГ-ЛИКВИДАЦИЯ** 🩸"
         action = "Маркет-мейкер смыл покупателей. Отскок или В-образный разворот вверх! 🟢"
@@ -122,17 +126,11 @@ def send_alert(symbol, side, amount_usd, price, vol24h):
 if __name__ == "__main__":
     print("=== Скринер крупных ордеров и сквизов Bybit успешно запущен ===", flush=True)
     
-    # Ищем ID канала ОДИН раз при старте скрипта
-    discover_chat_id()
-    
-    if DYNAMIC_CHAT_ID:
-        try:
-            bot.send_message(DYNAMIC_CHAT_ID, "🚀 Бот-радар Крупных Сквизов (Bybit) успешно активирован!")
-            print(f"Стартовое сообщение отправлено в чат {DYNAMIC_CHAT_ID}", flush=True)
-        except Exception as e:
-            print(f"Ошибка отправки стартового ТГ: {e}", flush=True)
+    try:
+        bot.send_message(DYNAMIC_CHAT_ID, "🚀 Бот-радар Крупных Сквизов (Bybit) успешно активирован!")
+    except Exception as e:
+        print(f"Ошибка стартового уведомления: {e}", flush=True)
 
-    # Запускаем бесконечный цикл сбора данных, где автоопределения больше НЕТ
     while True:
         try:
             active_coins = get_active_futures()
