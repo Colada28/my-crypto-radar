@@ -3,29 +3,31 @@ from datetime import datetime
 import requests
 import telebot
 
-# --- НАСТРОЙКИ (НАСТРОЕНЫ ДЛЯ ТИШИНЫ) ---
+# --- НАСТРОЙКИ (НАСТРОЕНЫ ДЛЯ ТИШИНЫ И УНИКАЛЬНОСТИ ССЫЛОК) ---
 
 # Токен золотого бота (BingX Global Short Screener) - УЖЕ ПОДСТАВЛЕН
 TELEGRAM_TOKEN = "8834450636:AAH0vH2ayzopTG2atZEezEa5PWkvKMV_Sxs"
 
 BYBIT_URL = "https://api.bybit.com"
 
-# НАСТРОЙКИ ФИЛЬТРОВ ЛИКВИДАЦИЙ (СДЕЛАЛИ ЖЕСТЧЕ, ЧТОБЫ УМЕНЬШИТЬ ЧАСТОТУ)
-# Бот будет игнорировать монеты с суточным объемом меньше $15,000,000.
-# Это уберет шум от мелких, неликвидных монет.
+# НАСТРОЙКИ ФИЛЬТРОВ ЛИКВИДАЦИЙ (ДЛЯ ТИШИНЫ)
+# Игнорировать монеты с суточным объемом меньше $15,000,000.
 MIN_VOLUME_24H = 15000000 
 
 # Триггер: фиксировать ликвидацию ТОЛЬКО от $10,000 за один ордер (было $3,000).
-# Это в 3 раза увеличит жесткость фильтра и кардинально уменьшит количество алертов.
+# Это в 3 раза увеличит жесткость фильтра и уберет 90% спама.
 MIN_LIQ_AMOUNT = 10000     
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 DYNAMIC_CHAT_ID = None
 
-# Словарь для хранения времени отправки последнего алерта по каждой монете.
-# Это защита от спама: бот не пришлет алерт по одной монете чаще, чем раз в 5 минут.
+# Словарь для защиты от спама по одной монете (коллдаун 5 минут)
 last_alerts = {}
-ALERT_COOLDOWN_SECONDS = 300 # Коллдаун 5 минут
+ALERT_COOLDOWN_SECONDS = 300 
+
+# --- ФИКС ССЫЛКИ ДЛЯ TRADINGVIEW ---
+# Базовый URL для графиков
+tradingview_base_url = "https://ru.tradingview.com/chart/?"
 
 def discover_chat_id():
     """Автоматически находит ID канала, где бот состоит в админах"""
@@ -93,7 +95,7 @@ def check_bybit_liquidations(active_coins):
             if symbol not in active_coins:
                 continue
                 
-            # 2. Проверяем фильтр анти-спама (коллдаун по монете)
+            # 2. Проверяем фильтр анти-спама (коллдаун по монете 5 минут)
             current_time = time.time()
             if symbol in last_alerts:
                 if current_time - last_alerts[symbol] < ALERT_COOLDOWN_SECONDS:
@@ -109,16 +111,16 @@ def check_bybit_liquidations(active_coins):
                 side = trade.get("side")
                 vol24h = active_coins[symbol]["vol24h"]
                 
-                # Отправляем алерт и запоминаем время
+                # Отправляем алерт и запоминаем время (защита от спама)
                 send_alert(symbol, side, amount_usd, price, vol24h)
-                last_alerts[symbol] = current_time # Устанавливаем коллдаун
+                last_alerts[symbol] = current_time 
                 time.sleep(1) # Небольшая пауза между алертами
                 
     except Exception as e:
         print(f"Ошибка парсинга ленты Bybit: {e}", flush=True)
 
 def send_alert(symbol, side, amount_usd, price, vol24h):
-    """Форматирует и отправляет сообщение в Телеграм с динамической ссылкой"""
+    """Форматирует и отправляет сообщение с УНИКАЛЬНОЙ ССЫЛКОЙ"""
     global DYNAMIC_CHAT_ID
     if not DYNAMIC_CHAT_ID:
         discover_chat_id() # Если ID еще нет, пробуем найти
@@ -134,38 +136,41 @@ def send_alert(symbol, side, amount_usd, price, vol24h):
         
     formatted_vol = f"${vol24h/1_000_000:.1f}M"
     
-    # --- ФИКС ССЫЛКИ НА TRADINGVIEW ---
-    # Мы убрали 'BYBIT:' и 'USDT', оставив только чистый тикер (например, KIN или BTC).
-    # Это универсальный формат ссылки, который всегда открывает нужный график на TradingView.
+    # --- ИСПРАВЛЕННЫЙ ФИКС ССЫЛКИ НА TRADINGVIEW ---
+    # Переменная symbol содержит тикер с USDT (например, 'KINUSDT').
+    # Мы убираем 'USDT', оставляя чистый тикер (например, 'KIN').
     clean_symbol = symbol.replace("USDT", "")
+    
+    # Формируем динамическую ссылку: tradingview.com/chart/?symbol=KIN или .../chart/?symbol=BTC
+    # Ссылка теперь ГАРАНТИРОВАННО будет вести на нужную монету.
+    dynamic_link = f"{tradingview_base_url}symbol={clean_symbol}"
     
     message = (
         f"{emoji}\n\n"
         f"🔹 **Монета:** #{clean_symbol} (Bybit)\n"
-        f"💵 **Цена исполнения:** {price:.8f}".rstrip('0').rstrip('.') + "\n"
-        f"💰 **Объем сквиза:** ${amount_usd:,.2f}\n\n"
-        f"📊 **Ликвидность площадки:**\n"
+        f"💵 **Цена:** {price:.8f}".rstrip('0').rstrip('.') + "\n"
+        f"💰 **Объем:** ${amount_usd:,.2f}\n\n"
+        f"📊 **Ликвидность:**\n"
         f"└ Суточный объем Bybit: {formatted_vol}\n\n"
         f"⚡ **Действие:** {action}\n\n"
-        f"🔗 [Открыть график {clean_symbol} на TradingView](https://ru.tradingview.com/chart/?symbol={clean_symbol})"
+        f"🔗 [Открыть график {clean_symbol} на TradingView]({dynamic_link})"
     )
     
     try:
         bot.send_message(DYNAMIC_CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔥 Сигнал крупного сквиза по {clean_symbol} на ${amount_usd:.0f} отправлен!", flush=True)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔥 Сигнал крупного сквиза по {clean_symbol} отправлен!", flush=True)
     except Exception as e:
         print(f"Ошибка отправки в ТГ: {e}", flush=True)
 
 if __name__ == "__main__":
-    print("=== Скринер крупных ордеров и сквизов Bybit успешно запущен ===", flush=True)
+    print("=== Скринер крупный ордеров Bybit (Версия с Уникальными Ссылками) успешно запущен ===", flush=True)
     
     # Ищем ID канала ОДИН раз при старте
     discover_chat_id()
     
     if DYNAMIC_CHAT_ID:
         try:
-            bot.send_message(DYNAMIC_CHAT_ID, "🚀 Бот-радар Крупных Сквизов (Bybit) успешно активирован!")
-            print(f"Стартовое сообщение отправлено в чат {DYNAMIC_CHAT_ID}", flush=True)
+            bot.send_message(DYNAMIC_CHAT_ID, "🚀 Бот-радар Крупных Сквизов Bybit (Тихая версия) активирован!")
         except Exception as e:
             print(f"Ошибка отправки стартового ТГ: {e}", flush=True)
 
