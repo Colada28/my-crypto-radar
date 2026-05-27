@@ -9,133 +9,110 @@ CHAT_ID = "-1003714825454"
 
 BINGX_URL = "https://open-api.bingx.com"
 
+# МИНИМАЛЬНЫЙ ПОРОГ ЛИКВИДНОСТИ (Защита от мусора и накруток маркетмейкеров)
+MIN_VOLUME_24H = 5000000  # Монета должна иметь от $5,000,000 объема за сутки
+MIN_LIQ_AMOUNT = 15000    # Триггер: ликвидация от $15,000 за одну свечу (можно настроить под себя)
+
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-def get_all_futures_symbols():
-    """Получает список всех доступных фьючерсных пар на BingX"""
+def get_active_futures():
+    """Получает все живые фьючерсные пары, проходящие фильтр по суточному объему"""
     url = f"{BINGX_URL}/openApi/swap/v2/quote/ticker"
     try:
         response = requests.get(url).json()
         if response.get("code") == 0:
-            return [item for item in response["data"] if item["symbol"].endswith("-USDT")]
+            valid_symbols = []
+            for item in response["data"]:
+                symbol = item["symbol"]
+                # Фильтруем только USDT пары
+                if symbol.endswith("-USDT"):
+                    vol_24h = float(item.get("volume", 0)) * float(item.get("lastPrice", 0))
+                    # Отсекаем мертвые пары с накрученными копеечными объемами
+                    if vol_24h >= MIN_VOLUME_24H:
+                        valid_symbols.append({
+                            "symbol": symbol,
+                            "price": float(item["lastPrice"]),
+                            "vol24h": vol_24h
+                        })
+            return valid_symbols
     except Exception as e:
-        print(f"Ошибка получения тикеров: {e}")
+        print(f"Ошибка получения списка фьючерсов: {e}")
     return []
 
-def get_funding_rate(symbol):
-    """Получает текущую ставку финансирования для конкретной монеты"""
-    url = f"{BINGX_URL}/openApi/swap/v2/quote/fundingRate"
-    params = {"symbol": symbol}
-    try:
-        response = requests.get(url, params=params).json()
-        if response.get("code") == 0:
-            return float(response["data"].get("fundingRate", 0))
-    except:
-        pass
-    return 0.0
-
-def analyze_coin(symbol, current_price):
-    """Анализирует историю дневных свечей монеты за последние 60 дней"""
-    url = f"{BINGX_URL}/openApi/swap/v3/quote/klines"
+def check_recent_liquidations(symbol, current_price, vol24h):
+    """Проверяет минутные свечи ликвидаций на BingX"""
+    # Используем официальный эндпоинт истории свечей ликвидаций
+    url = f"{BINGX_URL}/openApi/swap/v2/quote/liquidation"
     params = {
         "symbol": symbol,
-        "interval": "1d",
-        "limit": 60
+        "limit": 2 # Смотрим самую свежую закрытую минуту
     }
     
     try:
         response = requests.get(url, params=params).json()
         if response.get("code") != 0 or not response.get("data"):
-            return None
+            return
         
-        klines = response["data"]
-        if len(klines) < 30:
-            return None
+        # Получаем данные последней активности
+        data = response["data"]
+        for record in data:
+            # Считаем объем ликвидации в USDT
+            liq_qty = float(record.get("volume", 0))
+            liq_price = float(record.get("price", current_price))
+            liq_usd = liq_qty * liq_price
             
-        high_prices = [float(candle[2]) for candle in klines]
-        low_prices = [float(candle[3]) for candle in klines]
-        volumes = [float(candle[5]) for candle in klines]
-        
-        ath_60d = max(high_prices)
-        atl_60d = min(low_prices)
-        
-        pump_percentage = ((ath_60d - atl_60d) / atl_60d) * 100
-        if pump_percentage < 300:
-            return None
-            
-        distance_from_ath = ((ath_60d - current_price) / ath_60d) * 100
-        if not (1.0 <= distance_from_ath <= 10.0):
-            return None
-            
-        peak_volume = max(volumes)
-        recent_avg_volume = sum(volumes[-3:]) / 3
-        
-        if recent_avg_volume > (peak_volume * 0.7):
-            return None
-            
-        return {
-            "pump": pump_percentage,
-            "ath_dist": distance_from_ath,
-            "peak_vol": peak_volume,
-            "recent_vol": recent_avg_volume
-        }
-    except Exception as e:
-        print(f"Ошибка анализа истории для {symbol}: {e}")
-    return None
+            # Если ликвидация крупная — генерируем сигнал
+            if liq_usd >= MIN_LIQ_AMOUNT:
+                side = record.get("side") # BUY (Ликвидация Шорта) или SELL (Ликвидация Лонга)
+                send_alert(symbol, side, liq_usd, liq_price, vol24h)
+                break # Отправили один алерт и выходим, чтобы не спамить
+    except:
+        pass
 
-def scan_market():
-    """Основной цикл сканирования рынка"""
-    print("Запуск глобального сканирования рынка BingX...")
-    tickers = get_all_futures_symbols()
+def send_alert(symbol, side, amount_usd, price, vol24h):
+    """Форматирует и отправляет сообщение в Телеграм"""
     
-    for ticker in tickers:
-        symbol = ticker["symbol"]
-        current_price = float(ticker["lastPrice"])
+    # Стилизуем под тип сквиза
+    if side == "SELL" or side == "Sell":
+        emoji = "🩸 **ЛОНГ-СКВИЗ (ПАДЕНИЕ)** 🩸"
+        action = "Разгрузили покупателей. Ищем точку на V-образный ОТСКОК ВВЕРХ! 🟢"
+    else:
+        emoji = "🔥 **ШОРТ-СКВИЗ (ПАМП)** 🔥"
+        action = "Выбили продавцов. Потенциальный разворот или откат ВНИЗ! 🔴"
         
-        time.sleep(0.2)
-        
-        analysis = analyze_coin(symbol, current_price)
-        if analysis:
-            funding = get_funding_rate(symbol)
-            funding_pct = funding * 100
-            
-            if funding_pct > 0.02:
-                funding_status = f"{funding_pct:.4f}% 🟢 (Лонги платят шортам)"
-            elif funding_pct < 0.0:
-                funding_status = f"{funding_pct:.4f}% 🔴 (Шорты платят лонгам! Опасно)"
-            else:
-                funding_status = f"{funding_pct:.4f}% 🟡 (Нейтральный)"
-                
-            message = (
-                f"🚨 **ГЛОБАЛЬНЫЙ ШОРТ-СИГНАЛ** 🚨\n\n"
-                f"🔹 **Монета:** #{symbol.replace('-', '_')}\n"
-                f"💵 **Текущая цена:** {current_price}\n\n"
-                f"📊 **Метрики за 60 дней:**\n"
-                f"├ Истинный памп от дна: +{analysis['pump']:.1f}%\n"
-                f"└ Дистанция под ATH: -{analysis['ath_dist']:.1f}% (Полка)\n\n"
-                f"📉 **Затухание объемов:**\n"
-                f"├ Пиковый суточный объем: {analysis['peak_vol']:.1f}\n"
-                f"└ Средний объем за 3 дня: {analysis['recent_vol']:.1f}\n\n"
-                f"💸 **Ставка финансирования:**\n"
-                f"└ {funding_status}\n\n"
-                f"🔗 [Открыть график на TradingView](https://ru.tradingview.com/chart/?symbol=BINGX:{symbol.replace('-', '')})"
-            )
-            
-            try:
-                bot.send_message(CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
-                print(f"Сигнал по {symbol} успешно отправлен!")
-            except Exception as e:
-                print(f"Не удалось отправить сообщение в ТГ: {e}")
+    message = (
+        f"{emoji}\n\n"
+        f"🔹 **Монета:** #{symbol.replace('-', '_')}\n"
+        f"💵 **Цена ликвидации:** {price}\n"
+        f"💰 **Сумма ликвидации:** ${amount_usd:,.2f}\n\n"
+        f"📊 **Ликвидность рынка:**\n"
+        f"└ Суточный объем пары: ${vol24h/1_000_000:.1f}M\n\n"
+        f"⚡ **Действие:** {action}\n\n"
+        f"🔗 [График TradingView](https://ru.tradingview.com/chart/?symbol=BINGX:{symbol.replace('-', '')})"
+    )
+    
+    try:
+        bot.send_message(CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
+        print(f"🔥 Сигнал ликвидации по {symbol} на ${amount_usd:.0f} отправлен!")
+    except Exception as e:
+        print(f"Ошибка отправки в ТГ: {e}")
+
+def run_screener():
+    """Поминутный цикл проверки"""
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Сканирование ликвидаций...")
+    active_coins = get_active_futures()
+    
+    for coin in active_coins:
+        # Небольшая пауза между запросами, чтобы биржа не забанила по лимитам
+        time.sleep(0.1)
+        check_recent_liquidations(coin["symbol"], coin["price"], coin["vol24h"])
 
 if __name__ == "__main__":
-    current_hour = datetime.utcnow().hour
-    current_minute = datetime.utcnow().minute
-    
-    # Проверяем, делится ли текущий час на 4, и попали ли мы в первые 10 минут этого часа
-    if current_hour % 4 == 0 and current_minute < 10:
+    # Скринер теперь работает постоянно, запускаясь каждую минуту
+    while True:
         try:
-            scan_market()
+            run_screener()
         except Exception as e:
-            print(f"Ошибка при сканировании рынка: {e}")
-    else:
-        print(f"Пропуск сканирования BingX (Текущее время UTC: {current_hour:02d}:{current_minute:02d}). Ждем плановый час.")
+            print(f"Критическая ошибка цикла: {e}")
+        # Спим 60 секунд до следующего раунда проверок
+        time.sleep(60)
