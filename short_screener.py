@@ -1,124 +1,135 @@
 import time
+from datetime import datetime
 import requests
 import telebot
+import os
+import http.server
+import threading
 
-# --- НАСТРОЙКИ ---
-TELEGRAM_TOKEN = "8834450636:AAH0vH2ayzopTG2atZEezEa5PWkvKMV_Sxs"
-DYNAMIC_CHAT_ID = "354415600"
+# ==========================================
+# --- БЛОК 1: НАСТРОЙКИ (УЖЕ ЗАПОЛНЕНЫ) ---
+# ==========================================
 
-# Переключаемся на официальный API BingX (Swap/Futures)
-BINGX_URL = "https://open-api.bingx.com"
+TELEGRAM_TOKEN = "7294451636:AAH0vH2ayzopTG2atZEezEa5PWkvKMV_Sxs" 
+CHAT_ID = "-1003714825454" 
+BINGX_URL = "https://open-api.bingx.com/openApi/swap/v2/quote/ticker"
 
-# ФИЛЬТРЫ АЛЕРТОВ
-MIN_VOLUME_24H = 1000000  # Фильтр: суточный объем монеты на BingX от $1,000,000
-MIN_LIQ_AMOUNT = 3000     # Триггер: рыночный сквиз/ордер от $3,000
+# --- ФИЛЬТРЫ ПРОТИВ СПАМА ---
+MIN_VOLUME_24H = 20000000 
+THRESHOLD_PERCENT = 7.0 
+CHECK_INTERVAL_SECONDS = 300 
+
+# ==========================================
+# --- БЛОК 2: ЛОГИКА (НЕ ТРЕБУЕТ ПРАВОК) ---
+# ==========================================
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
+previous_prices = {}
 
-def get_active_bingx_pairs():
-    """Получает все деривативные пары с BingX и фильтрует по объему"""
-    url = f"{BINGX_URL}/openApi/swap/v2/market/ticker"
+def start_simple_http_server():
+    """Запускает простой веб-сервер на порту для деплоя Render."""
+    port = int(os.environ.get('PORT', 8080))
+    server_address = ('', port)
+    class SimpleHandler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"OK")
+    print(f"--- Простой веб-сервер запущен на порту {port} для Render ---", flush=True)
+    httpd = http.server.HTTPServer(server_address, SimpleHandler)
+    httpd.serve_forever()
+
+threading.Thread(target=start_simple_http_server, daemon=True).start()
+
+def get_bingx_tickers():
+    """Получает текущие данные по всем парам с BingX"""
     try:
-        res = requests.get(url, timeout=10)
-        if res.status_code == 200:
-            response = res.json()
-            if response.get("code") == 0 and "data" in response:
-                valid_symbols = {}
-                for item in response["data"]:
-                    symbol = item.get("symbol")
-                    # Нам нужны только фьючерсы к USDT (например, BTC-USDT)
-                    if symbol and symbol.endswith("-USDT"):
-                        vol_24h = float(item.get("volume", 0)) # Объем в USDT за 24ч
-                        if vol_24h >= MIN_VOLUME_24H:
-                            valid_symbols[symbol] = {
-                                "price": float(item.get("lastPrice", 0)),
-                                "vol24h": vol_24h
-                            }
-                return valid_symbols
-    except Exception:
-        pass
-    return {}
+        response = requests.get(BINGX_URL, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("code") == 0:
+                tickers = data.get("data", [])
+                result = {}
+                for item in tickers:
+                    symbol = item["symbol"]
+                    if symbol.endswith("-USDT"):
+                        clean_symbol = symbol.replace("-USDT", "USDT")
+                        volume = float(item.get("volume24h", item.get("volume24h_quote", 0)))
+                        result[clean_symbol] = {
+                            "price": float(item["lastPrice"]),
+                            "volume": volume,
+                            "change": float(item["priceChangePercent"])
+                        }
+                return result
+    except Exception as e:
+        print(f"Ошибка получения данных BingX: {e}", flush=True)
+    return None
 
-def check_bingx_trades(active_coins):
-    """Сканирует последние крупные сделки в реальном времени на BingX"""
-    for symbol in list(active_coins.keys()):
-        url = f"{BINGX_URL}/openApi/swap/v2/market/trades?symbol={symbol}&limit=10"
-        try:
-            res = requests.get(url, timeout=5)
-            if res.status_code != 200:
-                continue
-                
-            response = res.json()
-            if response.get("code") != 0 or not response.get("data"):
-                continue
-                
-            trades = response["data"]
-            for trade in trades:
-                price = float(trade.get("price", 0))
-                qty = float(trade.get("qty", 0))
-                amount_usd = qty * price
-                
-                # Если сделка превышает наш лимит ($3,000)
-                if amount_usd >= MIN_LIQ_AMOUNT:
-                    # У BingX buy=True означает покупку по маркету (вынос шортов / сильный закуп)
-                    # buy=False означает продажу по маркету (вынос лонгов / слив)
-                    is_buyer = trade.get("isBuyerMaker", False)
-                    side = "BUY" if is_buyer else "SELL"
-                    
-                    vol24h = active_coins[symbol]["vol24h"]
-                    send_alert(symbol, side, amount_usd, price, vol24h)
-                    
-                    # Защита от спама по одной и той же монете
-                    time.sleep(0.5)
-                    
-        except Exception:
-            pass
-        # Пауза между запросами к разным монетам, чтобы API BingX не заблокировал
-        time.sleep(0.2)
-
-def send_alert(symbol, side, amount_usd, price, vol24h):
-    """Форматирует алерты под BingX и отправляет в ТГ"""
-    # Красивое имя для отображения (из BTC-USDT делаем BTCUSDT)
-    clean_symbol = symbol.replace("-", "")
-    
-    if side == "SELL":
-        emoji = "🩸 **КРУПНЫЙ СБРОС / ЛОНГ-ЛИКВИДАЦИЯ (BingX)** 🩸"
-        action = "Маркет-мейкер смыл покупателей. Отскок или В-образный разворот вверх! 🟢"
+def send_pump_alert(symbol, change, price, volume):
+    """Форматирует и отправляет сообщение с ТОЧНОЙ ССЫЛКОЙ НА COINGLASS"""
+    if change > 0:
+        emoji = "🟢 БЫСТРЫЙ ПАМП 📈"
+        type_text = "Взлет цены!"
     else:
-        emoji = "🔥 **ИМПУЛЬСНЫЙ ПРОБИЙ / ШОРТ-ЛИКВИДАЦИЯ (BingX)** 🔥"
-        action = "Продавцов вынесло по стопам. Потенциальный разворот рынка вниз! 🔴"
+        emoji = "🔴 БЫСТРЫЙ ДАМП 📉"
+        type_text = "Сброс цены!"
         
+    formatted_vol = f"${volume/1_000_000:.2f}M"
+    clean_symbol = symbol.replace("USDT", "")
+    
+    # --- ИСПРАВЛЕНИЕ: Формируем ссылку строго в формате BingX_ТИКЕРUSDT ---
+    # Coinglass требует полное имя контракта для BingX, например: BingX_EDENUSDT
+    dynamic_link = f"https://www.coinglass.com/tv/BingX_{clean_symbol}USDT"
+    
     message = (
         f"{emoji}\n\n"
-        f"🔹 **Монета:** #{clean_symbol}\n"
-        f"💵 **Цена исполнения:** {price}\n"
-        f"💰 **Объем сквиза:** ${amount_usd:,.2f}\n\n"
-        f"📊 **Ликвидность площадки:**\n"
-        f"└ Суточный объем BingX: ${vol24h/1_000_000:.1f}M\n\n"
-        f"⚡ **Действие:** {action}\n\n"
-        f"🔗 [График TradingView](https://ru.tradingview.com/chart/?symbol=BINGX:{clean_symbol})"
+        f"🔹 **Монета:** #{clean_symbol} (BingX)\n"
+        f"📊 **Изменение:** {change:+.2f}%\n"
+        f"💰 **Текущая цена:** {price:.8f}".rstrip('0').rstrip('.') + "\n"
+        f"💰 **Объем 24h:** {formatted_vol}\n\n"
+        f"⚡ **Суть:** {type_text}\n"
+        f"🔗 [Анализ графика {clean_symbol} на Coinglass]({dynamic_link})"
     )
     
     try:
-        bot.send_message(DYNAMIC_CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
-        print(f"🔥 Сигнал BingX по {clean_symbol} отправлен!", flush=True)
+        bot.send_message(CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔥 Сигнал по {clean_symbol} отправлен!", flush=True)
     except Exception as e:
-        print(f"Ошибка ТГ: {e}", flush=True)
+        print(f"Ошибка отправки в ТГ: {e}", flush=True)
 
 if __name__ == "__main__":
-    print("=== Скринер крупных ордеров BingX успешно запущен ===", flush=True)
+    print(f"=== Скринер Пампов BingX запущен. Фильтр: {THRESHOLD_PERCENT}%, Объем: ${MIN_VOLUME_24H/1_000_000}M ===", flush=True)
     
-    try:
-        bot.send_message(DYNAMIC_CHAT_ID, "🚀 Бот-радар Крупных Сквизов (BingX) успешно активирован!")
-    except Exception as e:
-        print(f"Ошибка стартового ТГ: {e}", flush=True)
+    tickers = get_bingx_tickers()
+    if tickers:
+        for symbol, data in tickers.items():
+            previous_prices[symbol] = data["price"]
+        print(f"База цен инициализирована. Ожидание первой проверки...", flush=True)
+    
+    time.sleep(CHECK_INTERVAL_SECONDS)
 
     while True:
         try:
-            active_coins = get_active_bingx_pairs()
-            if active_coins:
-                check_bingx_trades(active_coins)
+            current_tickers = get_bingx_tickers()
+            if not current_tickers:
+                time.sleep(10)
+                continue
+                
+            for symbol, current_data in current_tickers.items():
+                if current_data["volume"] < MIN_VOLUME_24H:
+                    continue
+                    
+                if symbol in previous_prices:
+                    old_price = previous_prices[symbol]
+                    new_price = current_data["price"]
+                    if old_price == 0: continue
+                    
+                    price_change = ((new_price - old_price) / old_price) * 100
+                    if abs(price_change) >= THRESHOLD_PERCENT:
+                        send_pump_alert(symbol, price_change, new_price, current_data["volume"])
+                
+                previous_prices[symbol] = current_data["price"]
         except Exception as e:
-            print(f"Ошибка цикла: {e}", flush=True)
-        # Интервал проверки всей биржи
-        time.sleep(15)
+            print(f"Критическая ошибка цикла: {e}", flush=True)
+            
+        time.sleep(CHECK_INTERVAL_SECONDS)
