@@ -9,9 +9,9 @@ CHAT_ID = "-1003714825454"
 
 BINGX_URL = "https://open-api.bingx.com"
 
-# МИНИМАЛЬНЫЙ ПОРОГ ЛИКВИДНОСТИ (Защита от мусора и накруток маркетмейкеров)
-MIN_VOLUME_24H = 5000000  # Монета должна иметь от $5,000,000 объема за сутки
-MIN_LIQ_AMOUNT = 15000    # Триггер: ликвидация от $15,000 за одну свечу (можно настроить под себя)
+# МИНИМАЛЬНЫЙ ПОРОГ ЛИКВИДНОСТИ
+MIN_VOLUME_24H = 5000000  # От $5,000,000 объема за сутки
+MIN_LIQ_AMOUNT = 15000    # Ликвидация от $15,000 за одну свечу
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
@@ -19,15 +19,18 @@ def get_active_futures():
     """Получает все живые фьючерсные пары, проходящие фильтр по суточному объему"""
     url = f"{BINGX_URL}/openApi/swap/v2/quote/ticker"
     try:
-        response = requests.get(url).json()
+        res = requests.get(url, timeout=10)
+        if res.status_code != 200:
+            print(f"⏳ BingX API недоступен при получении тикеров (Статус: {res.status_code})")
+            return []
+            
+        response = res.json()
         if response.get("code") == 0:
             valid_symbols = []
             for item in response["data"]:
                 symbol = item["symbol"]
-                # Фильтруем только USDT пары
                 if symbol.endswith("-USDT"):
                     vol_24h = float(item.get("volume", 0)) * float(item.get("lastPrice", 0))
-                    # Отсекаем мертвые пары с накрученными копеечными объемами
                     if vol_24h >= MIN_VOLUME_24H:
                         valid_symbols.append({
                             "symbol": symbol,
@@ -40,40 +43,43 @@ def get_active_futures():
     return []
 
 def check_recent_liquidations(symbol, current_price, vol24h):
-    """Проверяет минутные свечи ликвидаций на BingX"""
-    # Используем официальный эндпоинт истории свечей ликвидаций
+    """Проверяет минутные свечи ликвидаций на BingX с защитой от ошибок парсинга"""
     url = f"{BINGX_URL}/openApi/swap/v2/quote/liquidation"
-    params = {
-        "symbol": symbol,
-        "limit": 2 # Смотрим самую свежую закрытую минуту
-    }
+    params = {"symbol": symbol, "limit": 2}
     
     try:
-        response = requests.get(url, params=params).json()
+        res = requests.get(url, params=params, timeout=10)
+        
+        # Если поймали ограничение частоты запросов (Rate Limit / Cloudflare)
+        if res.status_code == 429 or res.status_code == 403:
+            print("🛑 Превышен лимит запросов к BingX. Включаем режим ожидания...")
+            time.sleep(30)
+            return
+            
+        if res.status_code != 200:
+            return
+
+        response = res.json()
         if response.get("code") != 0 or not response.get("data"):
             return
         
-        # Получаем данные последней активности
         data = response["data"]
         for record in data:
-            # Считаем объем ликвидации в USDT
             liq_qty = float(record.get("volume", 0))
             liq_price = float(record.get("price", current_price))
             liq_usd = liq_qty * liq_price
             
-            # Если ликвидация крупная — генерируем сигнал
             if liq_usd >= MIN_LIQ_AMOUNT:
-                side = record.get("side") # BUY (Ликвидация Шорта) или SELL (Ликвидация Лонга)
+                side = record.get("side")
                 send_alert(symbol, side, liq_usd, liq_price, vol24h)
-                break # Отправили один алерт и выходим, чтобы не спамить
-    except:
+                break
+    except Exception:
+        # Беззвучно пропускаем ошибки парсинга HTML-страниц блокировок
         pass
 
 def send_alert(symbol, side, amount_usd, price, vol24h):
     """Форматирует и отправляет сообщение в Телеграм"""
-    
-    # Стилизуем под тип сквиза
-    if side == "SELL" or side == "Sell":
+    if side in ["SELL", "Sell"]:
         emoji = "🩸 **ЛОНГ-СКВИЗ (ПАДЕНИЕ)** 🩸"
         action = "Разгрузили покупателей. Ищем точку на V-образный ОТСКОК ВВЕРХ! 🟢"
     else:
@@ -99,20 +105,22 @@ def send_alert(symbol, side, amount_usd, price, vol24h):
 
 def run_screener():
     """Поминутный цикл проверки"""
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] Сканирование ликвидаций...")
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Сканирование ликвидаций BingX...")
     active_coins = get_active_futures()
     
+    if not active_coins:
+        return
+
     for coin in active_coins:
-        # Небольшая пауза между запросами, чтобы биржа не забанила по лимитам
-        time.sleep(0.1)
+        # Увеличили паузу до 0.25 сек, чтобы не злить Cloudflare биржи BingX
+        time.sleep(0.25)
         check_recent_liquidations(coin["symbol"], coin["price"], coin["vol24h"])
 
 if __name__ == "__main__":
-    # Скринер теперь работает постоянно, запускаясь каждую минуту
+    print("=== Скринер ликвидаций BingX успешно инициализирован ===")
     while True:
         try:
             run_screener()
         except Exception as e:
-            print(f"Критическая ошибка цикла: {e}")
-        # Спим 60 секунд до следующего раунда проверок
+            print(f"Критическая ошибка цикла BingX: {e}")
         time.sleep(60)
