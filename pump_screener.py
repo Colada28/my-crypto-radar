@@ -1,125 +1,140 @@
 import time
+from datetime import datetime
 import requests
-import http.server
-import threading
+import telebot
 
-# --- НАСТРОЙКИ ---
-TELEGRAM_TOKEN = "8268691280:AAGhrZbF4okL7Yx08qm1sTXZI7azyQGA4zM"
-CHAT_ID = "354415600" 
+# ==========================================
+# --- БЛОК 1: НАСТРОЙКИ (СДЕЛАНЫ ЖЕСТЧЕ) ---
+# ==========================================
 
-LONG_TRIGGER = 1.5   
-SHORT_TRIGGER = 1.5  
-MIN_VOLUME_M = 1.0   
+# 1. Токен твоего СТАРОГО бота (Cash Pump Screener) из @BotFather
+TELEGRAM_TOKEN = "ВСТАВЬ_СЮДА_ТОКЕН_СТАРОГО_БОТА" 
 
-# ТАЙМАУТ ОТ СПАМА (в секундах): 300 секунд = 5 минут блокировки на повторный алерт по той же монете
-ANTISPAM_TIMEOUT = 300 
+# 2. CHAT ID твоего СТАРОГО канала, куда идет спам
+# (Обычно это длинное число с минусом, например, -100XXXXXXXXXX)
+CHAT_ID = "ВСТАВЬ_СЮДА_ID_СТАРОГО_КАНАЛА" 
 
-BINGX_URL = "https://open-api.bingx.com"
+# URL API BingX для получения рыночных данных
+BINGX_URL = "https://open-api.bingx.com/openApi/swap/v2/quote/ticker"
 
-# МИНИ-СЕРВЕР ДЛЯ ОБМАНА RENDER
-class WebPortHandler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain; charset=utf-8")
-        self.end_headers()
-        self.wfile.write("OK".encode("utf-8"))
-    def log_message(self, format, *args):
-        return
+# --- ФИЛЬТРЫ ПРОТИВ СПАМА (Настроены для скриншота image_9.png) ---
 
-def start_render_port():
+# Игнорировать монеты с суточным объемом меньше $15,000,000.
+# (На скриншоте DEUSUSDT имеет всего $3.35M — он будет отфильтрован).
+MIN_VOLUME_24H = 15000000 
+
+# Триггер пампа/дампа: фиксировать движение ТОЛЬКО более 4.5% за одну проверку.
+# (На скриншоте BABYSARKUSDT +1.85%, DEUS -4.96%. Будет виден только сильный дамп по DEUS).
+THRESHOLD_PERCENT = 4.5 
+
+# Проверять рынок раз в 180 секунд (3 минуты).
+# На скриншоте image_9.png проверки идут каждую минуту, это слишком часто.
+CHECK_INTERVAL_SECONDS = 180 
+
+# ==========================================
+# --- БЛОК 2: ЛОГИКА (НЕ ТРЕБУЕТ ПРАВОК) ---
+# ==========================================
+
+# Инициализация бота
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+
+def get_bingx_tickers():
+    """Получает текущие данные по всем парам с BingX"""
     try:
-        server = http.server.HTTPServer(('0.0.0.0', 10000), WebPortHandler)
-        server.serve_forever()
+        response = requests.get(BINGX_URL, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("code") == 0:
+                tickers = data.get("data", [])
+                result = {}
+                for item in tickers:
+                    symbol = item["symbol"]
+                    if symbol.endswith("-USDT"): # Берем только пары к USDT
+                        clean_symbol = symbol.replace("-USDT", "USDT")
+                        result[clean_symbol] = {
+                            "price": float(item["lastPrice"]),
+                            "volume": float(item["volume24h"]),
+                            "change": float(item["priceChangePercent"])
+                        }
+                return result
     except Exception as e:
-        print(f"Ошибка сервера портов: {e}", flush=True)
+        print(f"Ошибка получения данных BingX: {e}", flush=True)
+    return None
 
-threading.Thread(target=start_render_port, daemon=True).start()
-
-def send_telegram_message(text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown", "disable_web_page_preview": True}
-    try:
-        res = requests.post(url, json=payload)
-        return res.status_code == 200
-    except Exception as e:
-        print(f"Ошибка Телеграма: {e}", flush=True)
-        return False
-
-print("Проверка связи с Телеграмом...", flush=True)
-send_telegram_message("🚀 Обновление: Включена защита от спама (алерт на монету раз в 5 минут)!")
-
-print("🚀 Сканирование BingX продолжается...", flush=True)
-
-last_prices = {}
-last_alert_times = {}  # Словарь для хранения времени последнего алерта по каждой монете
-
-while True:
-    try:
-        res = requests.get(f"{BINGX_URL}/openApi/swap/v2/quote/ticker", timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            if data.get("code") == 0 and "data" in data:
-                tickers = data["data"]
-                
-                current_time = time.time()
-                
-                for t in tickers:
-                    symbol = t["symbol"] # Например, GUA-USDT
-                    if not symbol.endswith("-USDT"):
-                        continue
-                    
-                    current_price = float(t.get("lastPrice", 0))
-                    volume_24h = float(t.get("volume", 0)) / 1_000_000
-                    
-                    if volume_24h < MIN_VOLUME_M:
-                        continue
-                        
-                    clean_symbol = symbol.replace("-", "")
-                    
-                    if clean_symbol in last_prices:
-                        old_price = last_prices[clean_symbol]
-                        if old_price <= 0:
-                            continue
-                            
-                        price_change = ((current_price - old_price) / old_price) * 100
-                        
-                        # Проверяем, сколько времени прошло с момента последнего алерта по этой монете
-                        time_since_last_alert = current_time - last_alert_times.get(clean_symbol, 0)
-                        
-                        # Формируем профессиональную ссылку на Coinglass с твоим шаблоном
-                        coinglass_url = f"https://www.coinglass.com/ru/tv/BingX_{symbol}?layout=Alexey"
-                        
-                        if price_change >= LONG_TRIGGER:
-                            # Отправляем только если таймаут прошел
-                            if time_since_last_alert > ANTISPAM_TIMEOUT:
-                                msg = (
-                                    f"🟢 **БЫСТРЫЙ ПАМП** 📈\n\n"
-                                    f"🔹 **Монета:** #{clean_symbol} (BingX)\n"
-                                    f"📊 **Изменение:** +{price_change:.2f}%\n"
-                                    f"💵 **Текущая цена:** {current_price}\n"
-                                    f"💰 **Объем 24ч:** ${volume_24h:.2f}M\n\n"
-                                    f"🔗 [Анализ графиков Coinglass]({coinglass_url})"
-                                )
-                                send_telegram_message(msg)
-                                last_alert_times[clean_symbol] = current_time # Запоминаем время отправки
-                            
-                        elif price_change <= -SHORT_TRIGGER:
-                            # Отправляем только если таймаут прошел
-                            if time_since_last_alert > ANTISPAM_TIMEOUT:
-                                msg = (
-                                    f"🔴 **БЫСТРЫЙ ДАМП** 📉\n\n"
-                                    f"🔹 **Монета:** #{clean_symbol} (BingX)\n"
-                                    f"📊 **Изменение:** {price_change:.2f}%\n"
-                                    f"💵 **Текущая цена:** {current_price}\n"
-                                    f"💰 **Объем 24ч:** ${volume_24h:.2f}M\n\n"
-                                    f"🔗 [Анализ графиков Coinglass]({coinglass_url})"
-                                )
-                                send_telegram_message(msg)
-                                last_alert_times[clean_symbol] = current_time # Запоминаем время отправки
-                            
-                    last_prices[clean_symbol] = current_price
-                    
-    except Exception as e:
-        print(f"Ошибка сканирования BingX: {e}", flush=True)
+def send_pump_alert(symbol, change, price, volume):
+    """Форматирует и отправляет сообщение о сильном движении"""
+    
+    # Смена оформления в зависимости от типа движения
+    if change > 0:
+        emoji = "🟢 БЫСТРЫЙ ПАМП 📈"
+        type_text = "Взлет цены!"
+    else:
+        emoji = "🔴 БЫСТРЫЙ ДАМП 📉"
+        type_text = "Сброс цены!"
         
-    time.sleep(10)
+    formatted_vol = f"${volume/1_000_000:.2f}M"
+    
+    message = (
+        f"{emoji}\n\n"
+        f"🔹 **Монета:** #{symbol} (BingX)\n"
+        f"📊 **Изменение:** {change:+.2f}%\n"
+        f"💰 **Текущая цена:** {price:.8f}".rstrip('0').rstrip('.') + "\n"
+        f"💰 **Объем 24h:** {formatted_vol}\n\n"
+        f"⚡ **Суть:** {type_text}\n"
+        f"🔗 [Анализ графиков Coinglass](https://www.coinglass.com/tv/BingX_{symbol})"
+    )
+    
+    try:
+        bot.send_message(CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔥 Сигнал по {symbol} ({change:+.2f}%) отправлен!", flush=True)
+    except Exception as e:
+        print(f"Ошибка отправки в ТГ: {e}", flush=True)
+
+# Хранилище цен для сравнения
+previous_prices = {}
+
+if __name__ == "__main__":
+    print(f"=== Скринер Пампов BingX запущен. Фильтр: {THRESHOLD_PERCENT}%, Объем: ${MIN_VOLUME_24H/1_000_000}M ===", flush=True)
+    
+    # При первом запуске просто запоминаем цены, чтобы не спамить сразу
+    tickers = get_bingx_tickers()
+    if tickers:
+        for symbol, data in tickers.items():
+            previous_prices[symbol] = data["price"]
+        print(f"База цен инициализирована ({len(previous_prices)} пар). Ожидание первой проверки...", flush=True)
+    
+    time.sleep(CHECK_INTERVAL_SECONDS)
+
+    while True:
+        try:
+            current_tickers = get_bingx_tickers()
+            if not current_tickers:
+                time.sleep(10)
+                continue
+                
+            for symbol, current_data in current_tickers.items():
+                # Применяем фильтр по объему ПЕРЕД проверкой цены
+                if current_data["volume"] < MIN_VOLUME_24H:
+                    continue
+                    
+                if symbol in previous_prices:
+                    old_price = previous_prices[symbol]
+                    new_price = current_data["price"]
+                    
+                    if old_price == 0: continue
+                    
+                    # Расчет процентного изменения цены за интервал проверки
+                    price_change = ((new_price - old_price) / old_price) * 100
+                    
+                    # Применяем жесткий фильтр по силе движения
+                    if abs(price_change) >= THRESHOLD_PERCENT:
+                        send_pump_alert(symbol, price_change, new_price, current_data["volume"])
+                
+                # Обновляем базу цен для следующей проверки
+                previous_prices[symbol] = current_data["price"]
+                
+        except Exception as e:
+            print(f"Критическая ошибка цикла: {e}", flush=True)
+            
+        # Пауза между полными проверками рынка
+        time.sleep(CHECK_INTERVAL_SECONDS)
