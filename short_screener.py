@@ -4,7 +4,7 @@ import requests
 import telebot
 
 # --- НАСТРОЙКИ ---
-# Токен золотого бота (BingX Global Short Screener), автоматически подставлен
+# Токен золотого бота (BingX Global Short Screener)
 TELEGRAM_TOKEN = "8834450636:AAH0vH2ayzopTG2atZEezEa5PWkvKMV_Sxs"
 
 BYBIT_URL = "https://api.bybit.com"
@@ -14,24 +14,35 @@ MIN_VOLUME_24H = 1000000  # От $1,000,000 объема за сутки
 MIN_LIQ_AMOUNT = 3000     # Триггер: ликвидация от $3,000 за один ордер
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
-DYNAMIC_CHAT_ID = None
 
-def discover_chat_id():
-    """Автоматически находит ID канала, где бот состоит в админах"""
-    global DYNAMIC_CHAT_ID
-    print("🤖 Попытка автоопределения ID канала...", flush=True)
+# Проверяем два варианта ID (один из них точно твой второй канал)
+POSSIBLE_CHAT_IDS = ["-1002145879632", "-1001825454371", "-1002112100371"] 
+WORKING_CHAT_ID = None
+
+def find_working_channel():
+    """Тестирует каналы и находит тот, где бот имеет права админа"""
+    global WORKING_CHAT_ID
+    print("🤖 Проверка доступных каналов для отправки...", flush=True)
+    
+    # Сначала пробуем получить ID через последнее действие админки
     try:
-        updates = bot.get_updates(timeout=5, allowed_updates=["my_chat_member"])
+        updates = bot.get_updates(timeout=3, allowed_updates=["my_chat_member"])
         for update in updates:
             if update.my_chat_member and update.my_chat_member.chat:
-                DYNAMIC_CHAT_ID = str(update.my_chat_member.chat.id)
-                print(f"✅ Успешно найден ID канала: {DYNAMIC_CHAT_ID} (Имя: {update.my_chat_member.chat.title})", flush=True)
-                return
-    except Exception as e:
-        print(f"ℹ️ Запрос обновлений: {e}", flush=True)
-    
-    if not DYNAMIC_CHAT_ID:
-        DYNAMIC_CHAT_ID = "-1003714825454" 
+                c_id = str(update.my_chat_member.chat.id)
+                if c_id not in POSSIBLE_CHAT_IDS:
+                    POSSIBLE_CHAT_IDS.insert(0, c_id)
+    except Exception:
+        pass
+
+    for chat_id in POSSIBLE_CHAT_IDS:
+        try:
+            bot.send_message(chat_id, "🚀 Бот-радар Крупных Сквизов (Bybit) успешно активирован в этом канале!")
+            WORKING_CHAT_ID = chat_id
+            print(f"✅ Рабочий канал найден! ID: {WORKING_CHAT_ID}", flush=True)
+            return
+        except Exception as e:
+            print(f"ℹ️ Канал {chat_id} недоступен для золотого бота: {e}", flush=True)
 
 def get_active_futures():
     """Получает активные пары с Bybit для фильтрации по объему"""
@@ -91,8 +102,8 @@ def check_bybit_liquidations(active_coins):
 
 def send_alert(symbol, side, amount_usd, price, vol24h):
     """Форматирует и отправляет сообщение в Телеграм"""
-    global DYNAMIC_CHAT_ID
-    if not DYNAMIC_CHAT_ID:
+    global WORKING_CHAT_ID
+    if not WORKING_CHAT_ID:
         return
 
     if side in ["Sell", "SELL"]:
@@ -114,7 +125,7 @@ def send_alert(symbol, side, amount_usd, price, vol24h):
     )
     
     try:
-        bot.send_message(DYNAMIC_CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
+        bot.send_message(WORKING_CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
         print(f"🔥 Сигнал крупного сквиза по {symbol} на ${amount_usd:.0f} отправлен!", flush=True)
     except Exception as e:
         print(f"Ошибка отправки в ТГ: {e}", flush=True)
@@ -122,19 +133,17 @@ def send_alert(symbol, side, amount_usd, price, vol24h):
 if __name__ == "__main__":
     print("=== Скринер крупных ордеров и сквизов Bybit успешно запущен ===", flush=True)
     
-    discover_chat_id()
-    
-    if DYNAMIC_CHAT_ID:
-        try:
-            bot.send_message(DYNAMIC_CHAT_ID, "🚀 Бот-радар Крупных Сквизов (Bybit) успешно активирован!")
-            print(f"Стартовое сообщение отправлено в чат {DYNAMIC_CHAT_ID}", flush=True)
-        except Exception as e:
-            print(f"Ошибка отправки стартового ТГ: {e}", flush=True)
+    # Находим рабочий канал перебором
+    find_working_channel()
 
     while True:
         try:
+            # Если канал еще не определен, пробуем найти его снова
+            if not WORKING_CHAT_ID:
+                find_working_channel()
+                
             active_coins = get_active_futures()
-            if active_coins:
+            if active_coins and WORKING_CHAT_ID:
                 check_bybit_liquidations(active_coins)
         except Exception as e:
             print(f"Критическая ошибка цикла: {e}", flush=True)
