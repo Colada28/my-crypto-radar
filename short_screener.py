@@ -112,12 +112,19 @@ def run_screener():
         return
 
     for coin in active_coins:
-        # Увеличили паузу до 0.25 сек, чтобы не злить Cloudflare биржи BingX
+        # Пауза 0.25 сек, чтобы не злить Cloudflare биржи BingX
         time.sleep(0.25)
         check_recent_liquidations(coin["symbol"], coin["price"], coin["vol24h"])
 
 if __name__ == "__main__":
     print("=== Скринер ликвидаций BingX успешно инициализирован ===")
+    
+    # Отправляем тестовое уведомление в Телеграм при старте:
+    try:
+        bot.send_message(CHAT_ID, "🚀 Бот-радар BingX (Ликвидации) успешно запущен на бесплатном Web Service!")
+    except Exception as e:
+        print(f"Ошибка отправки стартового ТГ: {e}")
+
     while True:
         try:
             run_screener()
