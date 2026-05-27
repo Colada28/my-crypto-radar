@@ -3,14 +3,16 @@ import requests
 import http.server
 import threading
 
-# НАСТРОЙКИ БОТА
+# --- УЛЬТРА-АГРЕССИВНЫЕ НАСТРОЙКИ ---
 TELEGRAM_TOKEN = "8268691280:AAGhrZbF4okL7Yx08qm1sTXZI7azyQGA4zM"
-CHAT_ID = "5354904033"
+CHAT_ID = "-1003714825454"  # Жестко прописан твой рабочий канал
 
-LONG_TRIGGER = 2.0
-SHORT_TRIGGER = 3.0
-MIN_VOLUME_M = 1.0
-CHAT_ID = "354415600"
+LONG_TRIGGER = 1.5   # Ловим пампы от +1.5% за 10 секунд!
+SHORT_TRIGGER = 1.5  # Ловим дампы от -1.5% за 10 секунд!
+MIN_VOLUME_M = 1.0   # Объем от $1,000,000 (пропустит монеты типа GUA)
+
+BINGX_URL = "https://open-api.bingx.com"
+
 # МИНИ-СЕРВЕР ДЛЯ ОБМАНА RENDER (ОТВЕЧАЕТ НА ПОРТ 10000)
 class WebPortHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
@@ -26,48 +28,83 @@ def start_render_port():
         server = http.server.HTTPServer(('0.0.0.0', 10000), WebPortHandler)
         server.serve_forever()
     except Exception as e:
-        print(f"Ошибка сервера портов: {e}")
+        print(f"Ошибка сервера портов: {e}", flush=True)
 
 # Запуск порта в отдельном независимом потоке
 threading.Thread(target=start_render_port, daemon=True).start()
 
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}
+    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown", "disable_web_page_preview": True}
     try:
         res = requests.post(url, json=payload)
         return res.status_code == 200
     except Exception as e:
-        print(f"Ошибка Телеграма: {e}")
+        print(f"Ошибка Телеграма: {e}", flush=True)
         return False
 
-print("Проверка связи с Телеграмом...")
-send_telegram_message("🚀 Бот-радар Bybit успешно запущен на бесплатном Web Service!")
+print("Проверка связи с Телеграмом...", flush=True)
+# Однократная отправка при запуске (без спама)
+send_telegram_message("🚀 Агрессивный Памп-Радар (BingX) успешно активирован!")
 
-print("🚀 Сканирование Bybit началось...")
+print("🚀 Агрессивное сканирование BingX началось...", flush=True)
 last_prices = {}
 
 while True:
     try:
-        response = requests.get("https://api.bybit.com/v5/market/tickers?category=linear").json()
-        if response.get("retCode") == 0:
-            tickers = response["result"]["list"]
-            for t in tickers:
-                symbol = t["symbol"]
-                if not symbol.endswith("USDT"):
-                    continue
-                current_price = float(t["lastPrice"])
-                volume_24h = float(t["turnover24h"]) / 1_000_000
-                if volume_24h < MIN_VOLUME_M:
-                    continue
-                if symbol in last_prices:
-                    old_price = last_prices[symbol]
-                    price_change = ((current_price - old_price) / old_price) * 100
-                    if price_change >= LONG_TRIGGER:
-                        send_telegram_message(f"🟢 *Памп!* #{symbol}\n📈 Изменение: +{price_change:.2f}%\n💰 Объем: {volume_24h:.2f}M USDT")
-                    elif price_change <= -SHORT_TRIGGER:
-                        send_telegram_message(f"🔴 *Дамп!* #{symbol}\n📉 Изменение: {price_change:.2f}%\n💰 Объем: {volume_24h:.2f}M USDT")
-                last_prices[symbol] = current_price
+        # Тянем тикеры с фьючерсов BingX
+        res = requests.get(f"{BINGX_URL}/openApi/swap/v2/quote/ticker", timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("code") == 0 and "data" in data:
+                tickers = data["data"]
+                
+                for t in tickers:
+                    symbol = t["symbol"]
+                    if not symbol.endswith("-USDT"):
+                        continue
+                    
+                    current_price = float(t.get("lastPrice", 0))
+                    # Объем торгов на BingX
+                    volume_24h = float(t.get("volume", 0)) / 1_000_000
+                    
+                    if volume_24h < MIN_VOLUME_M:
+                        continue
+                        
+                    clean_symbol = symbol.replace("-", "")
+                    
+                    if clean_symbol in last_prices:
+                        old_price = last_prices[clean_symbol]
+                        if old_price <= 0:
+                            continue
+                            
+                        price_change = ((current_price - old_price) / old_price) * 100
+                        
+                        if price_change >= LONG_TRIGGER:
+                            msg = (
+                                f"🟢 **БЫСТРЫЙ ПАМП** 📈\n\n"
+                                f"🔹 **Монета:** #{clean_symbol} (BingX)\n"
+                                f"📊 **Изменение:** +{price_change:.2f}%\n"
+                                f"💵 **Текущая цена:** {current_price}\n"
+                                f"💰 **Объем 24ч:** ${volume_24h:.2f}M\n\n"
+                                f"🔗 [График TradingView](https://ru.tradingview.com/chart/?symbol=BINGX:{clean_symbol})"
+                            )
+                            send_telegram_message(msg)
+                            
+                        elif price_change <= -SHORT_TRIGGER:
+                            msg = (
+                                f"🔴 **БЫСТРЫЙ ДАМП** 📉\n\n"
+                                f"🔹 **Монета:** #{clean_symbol} (BingX)\n"
+                                f"📊 **Изменение:** {price_change:.2f}%\n"
+                                f"💵 **Текущая цена:** {current_price}\n"
+                                f"💰 **Объем 24ч:** ${volume_24h:.2f}M\n\n"
+                                f"🔗 [График TradingView](https://ru.tradingview.com/chart/?symbol=BINGX:{clean_symbol})"
+                            )
+                            send_telegram_message(msg)
+                            
+                    last_prices[clean_symbol] = current_price
+                    
     except Exception as e:
-        print(f"Ошибка сканирования: {e}")
-    time.sleep(10)
+        print(f"Ошибка сканирования BingX: {e}", flush=True)
+        
+    time.sleep(10) # Проверка каждые 10 секунд
