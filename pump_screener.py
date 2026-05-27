@@ -3,184 +3,121 @@ from datetime import datetime
 import requests
 import telebot
 
-# --- НАСТРОЙКИ (НАСТРОЕНЫ ДЛЯ ТИШИНЫ И УНИКАЛЬНОСТИ ССЫЛОК) ---
+# ==========================================
+# --- БЛОК 1: НАСТРОЙКИ (ЗАПОЛНИ ИХ) ---
+# ==========================================
 
-# Токен золотого бота (BingX Global Short Screener) - УЖЕ ПОДСТАВЛЕН
-TELEGRAM_TOKEN = "8834450636:AAH0vH2ayzopTG2atZEezEa5PWkvKMV_Sxs"
+# Укажи токен твоего старого бота (Cash Pump Screener) из @BotFather
+TELEGRAM_TOKEN = "ЗАМЕНИ_НА_ТОКЕН_СТАРОГО_БОТА" 
 
-BYBIT_URL = "https://api.bybit.com"
+# Укажи CHAT ID твоего старого канала (например: -1001234567890)
+CHAT_ID = "ЗАМЕНИ_НА_ID_СТАРОГО_КАНАЛА" 
 
-# НАСТРОЙКИ ФИЛЬТРОВ ЛИКВИДАЦИЙ (ДЛЯ ТИШИНЫ)
-# Игнорировать монеты с суточным объемом меньше $15,000,000.
-MIN_VOLUME_24H = 15000000 
+# --- ФИЛЬТРЫ ПРОТИВ СПАМА (Настроены жестко) ---
 
-# Триггер: фиксировать ликвидацию ТОЛЬКО от $10,000 за один ордер (было $3,000).
-# Это в 3 раза увеличит жесткость фильтра и уберет 90% спама.
-MIN_LIQ_AMOUNT = 10000     
+# Игнорировать монеты с суточным объемом меньше $20,000,000.
+# (DEUS со скриншота image_9.png с его $3.35M будет отфильтрован).
+MIN_VOLUME_24H = 20000000 
+
+# Триггер пампа/дампа: фиксировать движение ТОЛЬКО более 6% за одну проверку.
+# (BABYSARK +1.85% со скриншота image_9.png будет отфильтрован).
+THRESHOLD_PERCENT = 6.0 
+
+# Проверять рынок раз в 300 секунд (5 минут). Это кардинально уберет спам.
+CHECK_INTERVAL_SECONDS = 300 
+
+# ==========================================
+# ==========================================
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
-DYNAMIC_CHAT_ID = None
+BINGX_URL = "https://open-api.bingx.com/openApi/swap/v2/quote/ticker"
+previous_prices = {}
 
-# Словарь для защиты от спама по одной монете (коллдаун 5 минут)
-last_alerts = {}
-ALERT_COOLDOWN_SECONDS = 300 
-
-# --- ФИКС ССЫЛКИ ДЛЯ TRADINGVIEW ---
-# Базовый URL для графиков
-tradingview_base_url = "https://ru.tradingview.com/chart/?"
-
-def discover_chat_id():
-    """Автоматически находит ID канала, где бот состоит в админах"""
-    global DYNAMIC_CHAT_ID
-    print("🤖 Попытка автоопределения ID канала...", flush=True)
+def get_bingx_tickers():
+    """Получает текущие данные по всем парам с BingX"""
     try:
-        # Пытаемся получить ID канала через updates
-        updates = bot.get_updates(timeout=5, allowed_updates=["my_chat_member"])
-        for update in updates:
-            if update.my_chat_member and update.my_chat_member.chat:
-                DYNAMIC_CHAT_ID = str(update.my_chat_member.chat.id)
-                print(f"✅ Успешно найден ID канала: {DYNAMIC_CHAT_ID} (Имя: {update.my_chat_member.chat.title})", flush=True)
-                return
-    except Exception as e:
-        print(f"ℹ️ Запрос обновлений (это нормально при старте): {e}", flush=True)
-    
-    # Если автоопределение не сработало, используем жестко прописанный резервный ID твоего канала
-    if not DYNAMIC_CHAT_ID:
-        DYNAMIC_CHAT_ID = "-1003714825454" 
-
-def get_active_futures():
-    """Получает активные пары с Bybit для фильтрации по объему"""
-    url = f"{BYBIT_URL}/v5/market/tickers?category=linear"
-    try:
-        res = requests.get(url, timeout=10)
-        if res.status_code == 200:
-            response = res.json()
-            if response.get("retCode") == 0:
-                valid_symbols = {}
-                for item in response["result"]["list"]:
+        response = requests.get(BINGX_URL, timeout=20)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("code") == 0:
+                tickers = data.get("data", [])
+                result = {}
+                for item in tickers:
                     symbol = item["symbol"]
-                    if symbol.endswith("USDT"): # Берем только пары к USDT
-                        vol_24h = float(item.get("turnover24h", 0))
-                        # Применяем жесткий фильтр по объему
-                        if vol_24h >= MIN_VOLUME_24H:
-                            valid_symbols[symbol] = {
-                                "price": float(item.get("lastPrice", 0)),
-                                "vol24h": vol_24h
-                            }
-                return valid_symbols
+                    if symbol.endswith("-USDT"):
+                        clean_symbol = symbol.replace("-USDT", "USDT")
+                        result[clean_symbol] = {
+                            "price": float(item["lastPrice"]),
+                            "volume": float(item["volume24h"]),
+                            "change": float(item["priceChangePercent"])
+                        }
+                return result
     except Exception as e:
-        print(f"Ошибка получения объемов Bybit: {e}", flush=True)
-    return {}
+        print(f"Ошибка получения данных BingX: {e}", flush=True)
+    return None
 
-def check_bybit_liquidations(active_coins):
-    """Проверяет последние крупные сделки на Bybit"""
-    # Запрашиваем 50 последних крупных сделок
-    url = f"{BYBIT_URL}/v5/market/recent-trade?category=linear&baseCoin=USDT&limit=50"
-    
-    try:
-        res = requests.get(url, timeout=10)
-        if res.status_code != 200:
-            return
-
-        response = res.json()
-        if response.get("retCode") != 0 or not response.get("result", {}).get("list"):
-            return
-            
-        trades = response["result"]["list"]
-        
-        for trade in trades:
-            symbol = trade.get("symbol")
-            
-            # 1. Сначала фильтруем по объему монеты
-            if symbol not in active_coins:
-                continue
-                
-            # 2. Проверяем фильтр анти-спама (коллдаун по монете 5 минут)
-            current_time = time.time()
-            if symbol in last_alerts:
-                if current_time - last_alerts[symbol] < ALERT_COOLDOWN_SECONDS:
-                    # Монета в коллдауне, пропускаем
-                    continue
-                
-            price = float(trade.get("price", 0))
-            qty = float(trade.get("size", 0))
-            amount_usd = qty * price
-            
-            # 3. Применяем жесткий фильтр по силе ликвидации ($10,000+)
-            if amount_usd >= MIN_LIQ_AMOUNT:
-                side = trade.get("side")
-                vol24h = active_coins[symbol]["vol24h"]
-                
-                # Отправляем алерт и запоминаем время (защита от спама)
-                send_alert(symbol, side, amount_usd, price, vol24h)
-                last_alerts[symbol] = current_time 
-                time.sleep(1) # Небольшая пауза между алертами
-                
-    except Exception as e:
-        print(f"Ошибка парсинга ленты Bybit: {e}", flush=True)
-
-def send_alert(symbol, side, amount_usd, price, vol24h):
-    """Форматирует и отправляет сообщение с УНИКАЛЬНОЙ ССЫЛКОЙ"""
-    global DYNAMIC_CHAT_ID
-    if not DYNAMIC_CHAT_ID:
-        discover_chat_id() # Если ID еще нет, пробуем найти
-        if not DYNAMIC_CHAT_ID: return
-
-    # Смена оформления в зависимости от типа движения
-    if side in ["Sell", "SELL"]:
-        emoji = "🩸 **КРУПНЫЙ СБРОС / ЛОНГ-ЛИКВИДАЦИЯ** 🩸"
-        action = "Маркет-мейкер смыл покупателей. Отскок или В-образный разворот вверх! 🟢"
+def send_pump_alert(symbol, change, price, volume):
+    """Форматирует и отправляет сообщение о сильном движении"""
+    if change > 0:
+        emoji = "🟢 БЫСТРЫЙ ПАМП 📈"
+        type_text = "Взлет цены!"
     else:
-        emoji = "🔥 **ИМПУЛЬСНЫЙ ПРОБИЙ / ШОРТ-ЛИКВИДАЦИЯ** 🔥"
-        action = "Продавцов вынесло по стопам. Потенциальный разворот рынка вниз! 🔴"
+        emoji = "🔴 БЫСТРЫЙ ДАМП 📉"
+        type_text = "Сброс цены!"
         
-    formatted_vol = f"${vol24h/1_000_000:.1f}M"
-    
-    # --- ИСПРАВЛЕННЫЙ ФИКС ССЫЛКИ НА TRADINGVIEW ---
-    # Переменная symbol содержит тикер с USDT (например, 'KINUSDT').
-    # Мы убираем 'USDT', оставляя чистый тикер (например, 'KIN').
-    clean_symbol = symbol.replace("USDT", "")
-    
-    # Формируем динамическую ссылку: tradingview.com/chart/?symbol=KIN или .../chart/?symbol=BTC
-    # Ссылка теперь ГАРАНТИРОВАННО будет вести на нужную монету.
-    dynamic_link = f"{tradingview_base_url}symbol={clean_symbol}"
-    
+    formatted_vol = f"${volume/1_000_000:.2f}M"
     message = (
         f"{emoji}\n\n"
-        f"🔹 **Монета:** #{clean_symbol} (Bybit)\n"
-        f"💵 **Цена:** {price:.8f}".rstrip('0').rstrip('.') + "\n"
-        f"💰 **Объем:** ${amount_usd:,.2f}\n\n"
-        f"📊 **Ликвидность:**\n"
-        f"└ Суточный объем Bybit: {formatted_vol}\n\n"
-        f"⚡ **Действие:** {action}\n\n"
-        f"🔗 [Открыть график {clean_symbol} на TradingView]({dynamic_link})"
+        f"🔹 **Монета:** #{symbol} (BingX)\n"
+        f"📊 **Изменение:** {change:+.2f}%\n"
+        f"💰 **Текущая цена:** {price:.8f}".rstrip('0').rstrip('.') + "\n"
+        f"💰 **Объем 24h:** {formatted_vol}\n\n"
+        f"⚡ **Суть:** {type_text}\n"
+        f"🔗 [Анализ графиков Coinglass](https://www.coinglass.com/tv/BingX_{symbol})"
     )
-    
     try:
-        bot.send_message(DYNAMIC_CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔥 Сигнал крупного сквиза по {clean_symbol} отправлен!", flush=True)
+        bot.send_message(CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔥 Сигнал по {symbol} отправлен!", flush=True)
     except Exception as e:
         print(f"Ошибка отправки в ТГ: {e}", flush=True)
 
 if __name__ == "__main__":
-    print("=== Скринер крупный ордеров Bybit (Версия с Уникальными Ссылками) успешно запущен ===", flush=True)
+    print(f"=== Скринер Пампов BingX запущен. Фильтр: {THRESHOLD_PERCENT}%, Объем: ${MIN_VOLUME_24H/1_000_000}M ===", flush=True)
+    # Полная тишина при старте. Никаких стартовых сообщений.
     
-    # Ищем ID канала ОДИН раз при старте
-    discover_chat_id()
+    tickers = get_bingx_tickers()
+    if tickers:
+        for symbol, data in tickers.items():
+            previous_prices[symbol] = data["price"]
+        print(f"База цен инициализирована. Ожидание первой проверки {CHECK_INTERVAL_SECONDS} секунд...", flush=True)
     
-    if DYNAMIC_CHAT_ID:
-        try:
-            bot.send_message(DYNAMIC_CHAT_ID, "🚀 Бот-радар Крупных Сквизов Bybit (Тихая версия) активирован!")
-        except Exception as e:
-            print(f"Ошибка отправки стартового ТГ: {e}", flush=True)
+    time.sleep(CHECK_INTERVAL_SECONDS)
 
-    # Запускаем бесконечный цикл сбора данных с жесткими фильтрами
     while True:
         try:
-            active_coins = get_active_futures()
-            if active_coins:
-                check_bybit_liquidations(active_coins)
+            current_tickers = get_bingx_tickers()
+            if not current_tickers:
+                time.sleep(20)
+                continue
+                
+            for symbol, current_data in current_tickers.items():
+                if current_data["volume"] < MIN_VOLUME_24H:
+                    continue
+                    
+                if symbol in previous_prices:
+                    old_price = previous_prices[symbol]
+                    new_price = current_data["price"]
+                    
+                    if old_price == 0: continue
+                    
+                    price_change = ((new_price - old_price) / old_price) * 100
+                    
+                    # Применяем жесткий фильтр по силе движения (6%)
+                    if abs(price_change) >= THRESHOLD_PERCENT:
+                        send_pump_alert(symbol, price_change, new_price, current_data["volume"])
+                
+                previous_prices[symbol] = current_data["price"]
+                
         except Exception as e:
             print(f"Критическая ошибка цикла: {e}", flush=True)
-            time.sleep(30) # При критической ошибке ждем дольше
-        time.sleep(10) # Проверка раз в 10 секунд
+        time.sleep(CHECK_INTERVAL_SECONDS)
