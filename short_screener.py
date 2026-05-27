@@ -7,127 +7,109 @@ import telebot
 TELEGRAM_TOKEN = "8834450636:AAH0vH2ayzopTG2atZEezEa5PWkvKMV_Sxs"
 CHAT_ID = "-1003714825454"
 
-BINGX_URL = "https://open-api.bingx.com"
+BYBIT_URL = "https://api.bybit.com"
 
-# МИНИМАЛЬНЫЙ ПОРОГ ЛИКВИДНОСТИ
+# НАСТРОЙКИ ФИЛЬТРОВ ЛИКВИДАЦИЙ
 MIN_VOLUME_24H = 1000000  # От $1,000,000 объема за сутки
-MIN_LIQ_AMOUNT = 3000    # Ликвидация от $3,000 за одну свечу
+MIN_LIQ_AMOUNT = 3000     # Триггер: ликвидация от $3,000 за один ордер
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 def get_active_futures():
-    """Получает все живые фьючерсные пары, проходящие фильтр по суточному объему"""
-    url = f"{BINGX_URL}/openApi/swap/v2/quote/ticker"
+    """Получает active пары с Bybit для фильтрации по объему"""
+    url = f"{BYBIT_URL}/v5/market/tickers?category=linear"
+    try:
+        res = requests.get(url, timeout=10)
+        if res.status_code == 200:
+            response = res.json()
+            if response.get("retCode") == 0:
+                valid_symbols = {}
+                for item in response["result"]["list"]:
+                    symbol = item["symbol"]
+                    if symbol.endswith("USDT"):
+                        vol_24h = float(item.get("turnover24h", 0))
+                        if vol_24h >= MIN_VOLUME_24H:
+                            valid_symbols[symbol] = {
+                                "price": float(item.get("lastPrice", 0)),
+                                "vol24h": vol_24h
+                            }
+                return valid_symbols
+    except Exception as e:
+        print(f"Ошибка получения объемов Bybit: {e}")
+    return {}
+
+def check_bybit_liquidations(active_coins):
+    """Проверяет последние крупные сделки на Bybit"""
+    url = f"{BYBIT_URL}/v5/market/recent-trade?category=linear&baseCoin=USDT&limit=50"
+    
     try:
         res = requests.get(url, timeout=10)
         if res.status_code != 200:
-            print(f"⏳ BingX API недоступен при получении тикеров (Статус: {res.status_code})")
-            return []
-            
+            return
+
         response = res.json()
-        if response.get("code") == 0:
-            valid_symbols = []
-            for item in response["data"]:
-                symbol = item["symbol"]
-                if symbol.endswith("-USDT"):
-                    vol_24h = float(item.get("volume", 0)) * float(item.get("lastPrice", 0))
-                    if vol_24h >= MIN_VOLUME_24H:
-                        valid_symbols.append({
-                            "symbol": symbol,
-                            "price": float(item["lastPrice"]),
-                            "vol24h": vol_24h
-                        })
-            return valid_symbols
+        if response.get("retCode") != 0 or not response.get("result", {}).get("list"):
+            return
+            
+        trades = response["result"]["list"]
+        for trade in trades:
+            symbol = trade.get("symbol")
+            if symbol not in active_coins:
+                continue
+                
+            price = float(trade.get("price", 0))
+            qty = float(trade.get("size", 0))
+            amount_usd = qty * price
+            
+            if amount_usd >= MIN_LIQ_AMOUNT:
+                side = trade.get("side")
+                vol24h = active_coins[symbol]["vol24h"]
+                
+                send_alert(symbol, side, amount_usd, price, vol24h)
+                time.sleep(1)
+                
     except Exception as e:
-        print(f"Ошибка получения списка фьючерсов: {e}")
-    return []
-
-def check_recent_liquidations(symbol, current_price, vol24h):
-    """Проверяет минутные свечи ликвидаций на BingX с защитой от ошибок парсинга"""
-    url = f"{BINGX_URL}/openApi/swap/v2/quote/liquidation"
-    params = {"symbol": symbol, "limit": 2}
-    
-    try:
-        res = requests.get(url, params=params, timeout=10)
-        
-        # Если поймали ограничение частоты запросов (Rate Limit / Cloudflare)
-        if res.status_code == 429 or res.status_code == 403:
-            print("🛑 Превышен лимит запросов к BingX. Включаем режим ожидания...")
-            time.sleep(30)
-            return
-            
-        if res.status_code != 200:
-            return
-
-        response = res.json()
-        if response.get("code") != 0 or not response.get("data"):
-            return
-        
-        data = response["data"]
-        for record in data:
-            liq_qty = float(record.get("volume", 0))
-            liq_price = float(record.get("price", current_price))
-            liq_usd = liq_qty * liq_price
-            
-            if liq_usd >= MIN_LIQ_AMOUNT:
-                side = record.get("side")
-                send_alert(symbol, side, liq_usd, liq_price, vol24h)
-                break
-    except Exception:
-        # Беззвучно пропускаем ошибки парсинга HTML-страниц блокировок
-        pass
+        print(f"Ошибка парсинга ленты Bybit: {e}")
 
 def send_alert(symbol, side, amount_usd, price, vol24h):
     """Форматирует и отправляет сообщение в Телеграм"""
-    if side in ["SELL", "Sell"]:
-        emoji = "🩸 **ЛОНГ-СКВИЗ (ПАДЕНИЕ)** 🩸"
-        action = "Разгрузили покупателей. Ищем точку на V-образный ОТСКОК ВВЕРХ! 🟢"
+    if side in ["Sell", "SELL"]:
+        emoji = "🩸 **КРУПНЫЙ СБРОС / ЛОНГ-ЛИКВИДАЦИЯ** 🩸"
+        action = "Маркет-мейкер смыл покупателей. Отскок или В-образный разворот вверх! 🟢"
     else:
-        emoji = "🔥 **ШОРТ-СКВИЗ (ПАМП)** 🔥"
-        action = "Выбили продавцов. Потенциальный разворот или откат ВНИЗ! 🔴"
+        emoji = "🔥 **ИМПУЛЬСНЫЙ ПРОБИЙ / ШОРТ-ЛИКВИДАЦИЯ** 🔥"
+        action = "Продавцов вынесло по стопам. Потенциальный разворот рынка вниз! 🔴"
         
     message = (
         f"{emoji}\n\n"
-        f"🔹 **Монета:** #{symbol.replace('-', '_')}\n"
-        f"💵 **Цена ликвидации:** {price}\n"
-        f"💰 **Сумма ликвидации:** ${amount_usd:,.2f}\n\n"
-        f"📊 **Ликвидность рынка:**\n"
-        f"└ Суточный объем пары: ${vol24h/1_000_000:.1f}M\n\n"
+        f"🔹 **Монета:** #{symbol}\n"
+        f"💵 **Цена исполнения:** {price}\n"
+        f"💰 **Объем сквиза:** ${amount_usd:,.2f}\n\n"
+        f"📊 **Ликвидность площадки:**\n"
+        f"└ Суточный объем Bybit: ${vol24h/1_000_000:.1f}M\n\n"
         f"⚡ **Действие:** {action}\n\n"
-        f"🔗 [График TradingView](https://ru.tradingview.com/chart/?symbol=BINGX:{symbol.replace('-', '')})"
+        f"🔗 [График TradingView](https://ru.tradingview.com/chart/?symbol=BYBIT:{symbol})"
     )
     
     try:
         bot.send_message(CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
-        print(f"🔥 Сигнал ликвидации по {symbol} на ${amount_usd:.0f} отправлен!")
+        print(f"🔥 Сигнал крупного сквиза по {symbol} на ${amount_usd:.0f} отправлен!")
     except Exception as e:
         print(f"Ошибка отправки в ТГ: {e}")
 
-def run_screener():
-    """Поминутный цикл проверки"""
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] Сканирование ликвидаций BingX...")
-    active_coins = get_active_futures()
-    
-    if not active_coins:
-        return
-
-    for coin in active_coins:
-        # Пауза 0.25 сек, чтобы не злить Cloudflare биржи BingX
-        time.sleep(0.25)
-        check_recent_liquidations(coin["symbol"], coin["price"], coin["vol24h"])
-
 if __name__ == "__main__":
-    print("=== Скринер ликвидаций BingX успешно инициализирован ===")
+    print("=== Скринер крупных ордеров и сквизов Bybit успешно запущен ===")
     
-    # Отправляем тестовое уведомление в Телеграм при старте:
     try:
-        bot.send_message(CHAT_ID, "🚀 Бот-радар BingX (Ликвидации) успешно запущен на бесплатном Web Service!")
+        bot.send_message(CHAT_ID, "🚀 Бот-радар Крупных Сквизов (Bybit) успешно запущен на Render!")
     except Exception as e:
         print(f"Ошибка отправки стартового ТГ: {e}")
 
     while True:
         try:
-            run_screener()
+            active_coins = get_active_futures()
+            if active_coins:
+                check_bybit_liquidations(active_coins)
         except Exception as e:
-            print(f"Критическая ошибка цикла BingX: {e}")
-        time.sleep(60)
+            print(f"Критическая ошибка цикла: {e}")
+        time.sleep(10)
