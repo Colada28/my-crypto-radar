@@ -2,6 +2,9 @@ import time
 from datetime import datetime
 import requests
 import telebot
+import os
+import http.server
+import threading
 
 # ==========================================
 # --- БЛОК 1: НАСТРОЙКИ (УЖЕ ЗАПОЛНЕНЫ) ---
@@ -19,16 +22,16 @@ BINGX_URL = "https://open-api.bingx.com/openApi/swap/v2/quote/ticker"
 
 # --- ФИЛЬТРЫ ПРОТИВ СПАМА (Жестко настроены для тишины) ---
 
-# Игнорировать монеты с суточным объемом меньше $15,000,000.
+# Игнорировать монеты с суточным объемом меньше $20,000,000.
 # (Это уберет шум от неликвидных монет, как KIN).
-MIN_VOLUME_24H = 15000000 
+MIN_VOLUME_24H = 20000000 
 
-# Триггер пампа/дампа: фиксировать движение ТОЛЬКО более 5.0% за одну проверку.
+# Триггер пампа/дампа: фиксировать движение ТОЛЬКО более 7.0% за одну проверку.
 # Это отсеет 90% рыночного шума.
-THRESHOLD_PERCENT = 5.0 
+THRESHOLD_PERCENT = 7.0 
 
-# Проверять рынок раз в 180 секунд (3 минуты).
-CHECK_INTERVAL_SECONDS = 180 
+# Проверять рынок раз в 300 секунд (5 минут).
+CHECK_INTERVAL_SECONDS = 300 
 
 # ==========================================
 # --- БЛОК 2: ЛОГИКА (НЕ ТРЕБУЕТ ПРАВОК) ---
@@ -39,6 +42,24 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 # Хранилище цен для сравнения
 previous_prices = {}
+
+def start_simple_http_server():
+    """Запускает простой веб-сервер на порту, чтобы Render не блокировал деплой."""
+    port = int(os.environ.get('PORT', 8080))
+    server_address = ('', port)
+    
+    class SimpleHandler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"OK")
+            
+    print(f"--- Простой веб-сервер запущен на порту {port} для Render ---", flush=True)
+    httpd = http.server.HTTPServer(server_address, SimpleHandler)
+    httpd.serve_forever()
+
+# Запускаем веб-сервер в отдельном потоке
+threading.Thread(target=start_simple_http_server, daemon=True).start()
 
 def get_bingx_tickers():
     """Получает текущие данные по всем парам с BingX"""
@@ -53,9 +74,16 @@ def get_bingx_tickers():
                     symbol = item["symbol"]
                     if symbol.endswith("-USDT"): # Берем только пары к USDT
                         clean_symbol = symbol.replace("-USDT", "USDT")
+                        
+                        # --- ФИКС ОШИБКИ API ---
+                        # Пытаемся получить ключ 'volume24h', если он есть.
+                        # Если нет, используем ключ 'volume24h_quote', который присылает BingX.
+                        # Если и его нет, используем значение по умолчанию.
+                        volume = float(item.get("volume24h", item.get("volume24h_quote", 0)))
+                        
                         result[clean_symbol] = {
                             "price": float(item["lastPrice"]),
-                            "volume": float(item["volume24h"]),
+                            "volume": volume,
                             "change": float(item["priceChangePercent"])
                         }
                 return result
@@ -96,7 +124,7 @@ def send_pump_alert(symbol, change, price, volume):
     
     try:
         bot.send_message(CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔥 Сигнал по {clean_symbol} ({change:+.2f}%) отправлен!", flush=True)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔥 Сигнал по {clean_symbol} отправлен!", flush=True)
     except Exception as e:
         print(f"Ошибка отправки в ТГ: {e}", flush=True)
 
@@ -109,7 +137,7 @@ if __name__ == "__main__":
     if tickers:
         for symbol, data in tickers.items():
             previous_prices[symbol] = data["price"]
-        print(f"База цен инициализирована ({len(previous_prices)} пар). Ожидание первой проверки...", flush=True)
+        print(f"База цен инициализирована. Ожидание первой проверки...", flush=True)
     
     time.sleep(CHECK_INTERVAL_SECONDS)
 
@@ -134,7 +162,7 @@ if __name__ == "__main__":
                     # Расчет процентного изменения цены за интервал проверки
                     price_change = ((new_price - old_price) / old_price) * 100
                     
-                    # 2. Применяем жесткий фильтр по силе движения (5.0%+)
+                    # 2. Применяем жесткий фильтр по силе движения (7.0%+)
                     if abs(price_change) >= THRESHOLD_PERCENT:
                         send_pump_alert(symbol, price_change, new_price, current_data["volume"])
                 
