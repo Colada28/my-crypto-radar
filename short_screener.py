@@ -4,8 +4,8 @@ import requests
 import telebot
 
 # --- НАСТРОЙКИ ---
+# Токен золотого бота (BingX Global Short Screener), автоматически подставлен
 TELEGRAM_TOKEN = "8834450636:AAH0vH2ayzopTG2atZEezEa5PWkvKMV_Sxs"
-CHAT_ID = "-1003714825454"
 
 BYBIT_URL = "https://api.bybit.com"
 
@@ -14,9 +14,27 @@ MIN_VOLUME_24H = 1000000  # От $1,000,000 объема за сутки
 MIN_LIQ_AMOUNT = 3000     # Триггер: ликвидация от $3,000 за один ордер
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
+DYNAMIC_CHAT_ID = None
+
+def discover_chat_id():
+    """Автоматически находит ID канала, где бот состоит в админах"""
+    global DYNAMIC_CHAT_ID
+    print("🤖 Попытка автоопределения ID канала...", flush=True)
+    try:
+        updates = bot.get_updates(timeout=5, allowed_updates=["my_chat_member"])
+        for update in updates:
+            if update.my_chat_member and update.my_chat_member.chat:
+                DYNAMIC_CHAT_ID = str(update.my_chat_member.chat.id)
+                print(f"✅ Успешно найден ID канала: {DYNAMIC_CHAT_ID} (Имя: {update.my_chat_member.chat.title})", flush=True)
+                return
+    except Exception as e:
+        print(f"ℹ️ Запрос обновлений: {e}", flush=True)
+    
+    if not DYNAMIC_CHAT_ID:
+        DYNAMIC_CHAT_ID = "-1003714825454" 
 
 def get_active_futures():
-    """Получает active пары с Bybit для фильтрации по объему"""
+    """Получает активные пары с Bybit для фильтрации по объему"""
     url = f"{BYBIT_URL}/v5/market/tickers?category=linear"
     try:
         res = requests.get(url, timeout=10)
@@ -35,7 +53,7 @@ def get_active_futures():
                             }
                 return valid_symbols
     except Exception as e:
-        print(f"Ошибка получения объемов Bybit: {e}")
+        print(f"Ошибка получения объемов Bybit: {e}", flush=True)
     return {}
 
 def check_bybit_liquidations(active_coins):
@@ -69,10 +87,14 @@ def check_bybit_liquidations(active_coins):
                 time.sleep(1)
                 
     except Exception as e:
-        print(f"Ошибка парсинга ленты Bybit: {e}")
+        print(f"Ошибка парсинга ленты Bybit: {e}", flush=True)
 
 def send_alert(symbol, side, amount_usd, price, vol24h):
     """Форматирует и отправляет сообщение в Телеграм"""
+    global DYNAMIC_CHAT_ID
+    if not DYNAMIC_CHAT_ID:
+        return
+
     if side in ["Sell", "SELL"]:
         emoji = "🩸 **КРУПНЫЙ СБРОС / ЛОНГ-ЛИКВИДАЦИЯ** 🩸"
         action = "Маркет-мейкер смыл покупателей. Отскок или В-образный разворот вверх! 🟢"
@@ -92,18 +114,22 @@ def send_alert(symbol, side, amount_usd, price, vol24h):
     )
     
     try:
-        bot.send_message(CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
-        print(f"🔥 Сигнал крупного сквиза по {symbol} на ${amount_usd:.0f} отправлен!")
+        bot.send_message(DYNAMIC_CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
+        print(f"🔥 Сигнал крупного сквиза по {symbol} на ${amount_usd:.0f} отправлен!", flush=True)
     except Exception as e:
-        print(f"Ошибка отправки в ТГ: {e}")
+        print(f"Ошибка отправки в ТГ: {e}", flush=True)
 
 if __name__ == "__main__":
-    print("=== Скринер крупных ордеров и сквизов Bybit успешно запущен ===")
+    print("=== Скринер крупных ордеров и сквизов Bybit успешно запущен ===", flush=True)
     
-    try:
-        bot.send_message(CHAT_ID, "🚀 Бот-радар Крупных Сквизов (Bybit) успешно запущен на Render!")
-    except Exception as e:
-        print(f"Ошибка отправки стартового ТГ: {e}")
+    discover_chat_id()
+    
+    if DYNAMIC_CHAT_ID:
+        try:
+            bot.send_message(DYNAMIC_CHAT_ID, "🚀 Бот-радар Крупных Сквизов (Bybit) успешно активирован!")
+            print(f"Стартовое сообщение отправлено в чат {DYNAMIC_CHAT_ID}", flush=True)
+        except Exception as e:
+            print(f"Ошибка отправки стартового ТГ: {e}", flush=True)
 
     while True:
         try:
@@ -111,5 +137,5 @@ if __name__ == "__main__":
             if active_coins:
                 check_bybit_liquidations(active_coins)
         except Exception as e:
-            print(f"Критическая ошибка цикла: {e}")
+            print(f"Критическая ошибка цикла: {e}", flush=True)
         time.sleep(10)
