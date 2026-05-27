@@ -4,7 +4,7 @@ import requests
 import telebot
 
 # --- НАСТРОЙКИ ---
-# Токен золотого бота (BingX Global Short Screener), автоматически подставлен
+# Токен золотого бота (BingX Global Short Screener)
 TELEGRAM_TOKEN = "8834450636:AAH0vH2ayzopTG2atZEezEa5PWkvKMV_Sxs"
 
 BYBIT_URL = "https://api.bybit.com"
@@ -122,6 +122,7 @@ def send_alert(symbol, side, amount_usd, price, vol24h):
 if __name__ == "__main__":
     print("=== Скринер крупных ордеров и сквизов Bybit успешно запущен ===", flush=True)
     
+    # Ищем ID канала ОДИН раз при старте скрипта
     discover_chat_id()
     
     if DYNAMIC_CHAT_ID:
@@ -131,6 +132,7 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Ошибка отправки стартового ТГ: {e}", flush=True)
 
+    # Запускаем бесконечный цикл сбора данных, где автоопределения больше НЕТ
     while True:
         try:
             active_coins = get_active_futures()
