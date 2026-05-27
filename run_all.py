@@ -8,52 +8,48 @@ import threading
 class SimpleWebHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
-        self.send_header("Content-type", "text/html")
+        self.send_header("Content-type", "text/html; charset=utf-8")
         self.end_headers()
-        self.wfile.write(b"Crypto Radar is successfully running!")
+        self.wfile.write("Crypto Radar is successfully running!".encode("utf-8"))
 
     def log_message(self, format, *args):
-        # Отключаем лишний спам в логи Render
         return
 
 def run_web_server():
-    # Render по умолчанию дает порт 10000, если его нет — берем стандартный
     server_address = ("", 10000)
     httpd = HTTPServer(server_address, SimpleWebHandler)
-    print("🌍 Микро-веб-сервер запущен для Render на порту 10000")
+    print("🌍 Микро-веб-сервер запущен для Render на порту 10000", flush=True)
     httpd.serve_forever()
 
 # --- 2. ЗАПУСК НАШИХ СКРИНЕРОВ ---
 def run_screener(script_name):
-    """Функция для непрерывного запуска скрипта"""
     while True:
         try:
-            print(f"🚀 Запуск скринера: {script_name}...")
-            # Запускаем скрипт и ждем его логи в реальном времени
-            process = subprocess.Popen([sys.executable, script_name])
+            print(f"🚀 Запуск скринера: {script_name}...", flush=True)
+            # Флаг -u отключает буферизацию, логи будут видны сразу!
+            process = subprocess.Popen([sys.executable, "-u", script_name])
             process.wait()
         except Exception as e:
-            print(f"❌ Ошибка в работе {script_name}: {e}")
-        print(f"⏳ Перезапуск {script_name} через 5 секунд...")
+            print(f"❌ Ошибка в работе {script_name}: {e}", flush=True)
+        print(f"⏳ Перезапуск {script_name} через 5 секунд...", flush=True)
         time.sleep(5)
 
 if __name__ == "__main__":
-    print("=== Запуск глобальной экосистемы скринеров ===")
+    print("--- Запуск глобальной экосистемы скринеров ---", flush=True)
 
-    # 1. Запускаем веб-сервер в отдельном потоке, чтобы Render не ругался на порты
+    # Запускаем веб-сервер в отдельном потоке
     web_thread = threading.Thread(target=run_web_server, daemon=True)
     web_thread.start()
 
-    # Маленькая пауза перед запуском тяжелых скриптов
     time.sleep(2)
 
-    # 2. Запускаем параллельно оба скринера в отдельных потоках
+    # Запускаем параллельно оба скринера
     bybit_thread = threading.Thread(target=run_screener, args=("pump_screener.py",), daemon=True)
     bingx_thread = threading.Thread(target=run_screener, args=("short_screener.py",), daemon=True)
 
     bybit_thread.start()
     bingx_thread.start()
 
-    # Держим главный процесс запущенным
+    # Удерживаем главный поток живым
     while True:
         time.sleep(3600)
