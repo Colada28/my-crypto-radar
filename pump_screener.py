@@ -10,13 +10,14 @@ import threading
 # --- БЛОК 1: НАСТРОЙКИ ---
 # ==========================================
 
-TELEGRAM_TOKEN = "7294451636:AAH0vH2ayzopTG2atZEezEa5PWkvKMV_Sxs" 
+# Вставил новый токен от @BingX_Short_Screener_bot из твоего скриншота
+TELEGRAM_TOKEN = "7466171804:AAFofN0v1o2M16p-b8i_6A7E6yPkl8Y8xs0" 
 CHAT_ID = "-1003714825454" 
 
 BINGX_URL = "https://open-api.bingx.com/openApi/swap/v2/quote/ticker"
 BYBIT_URL = "https://api.bybit.com"
 
-# Мягкие и точные фильтры
+# Мягкие и точные фильтры под твой стоп/тейк
 MIN_VOLUME_24H = 1500000       # Полтора миллиона USDT суточного объема
 THRESHOLD_PERCENT = 1.5        # Импульс от 1.5% за 15 минут
 MIN_LIQ_AMOUNT = 1500          # Ликвидации на Bybit от $1,500
@@ -123,7 +124,7 @@ def send_liq_alert(symbol, side, amount_usd, price):
         print(f"Ошибка ТГ ликвидаций: {e}", flush=True)
 
 if __name__ == "__main__":
-    print("=== Единый Скринер запущен ===", flush=True)
+    print("=== Единый Скринер запущен с новым токеном ===", flush=True)
     
     # ТЕСТОВЫЙ СИГНАЛ ПРИ СТАРТЕ ДЛЯ ПРОВЕРКИ СВЯЗИ
     try:
