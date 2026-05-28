@@ -10,17 +10,17 @@ import threading
 # --- БЛОК 1: НАСТРОЙКИ ---
 # ==========================================
 
-# Сюда жестко вшит твой НОВЫЙ токен из скриншота 1000112134.jpg в одну строку
-TELEGRAM_TOKEN = "8834450636:AAEC-FohGV3UixvjoFWzYUhi4RWZsd6ZZsg" 
+# Чистый токен от @Alex_pump_alert_bot со скриншота 1000112137.jpg
+TELEGRAM_TOKEN = "8268691280:AAGhrZbF4okL7YxO8qm1sTXZI7azyQGA4zM" 
 CHAT_ID = "-1003714825454" 
 
 BINGX_URL = "https://open-api.bingx.com/openApi/swap/v2/quote/ticker"
 BYBIT_URL = "https://api.bybit.com"
 
-# Рабочие фильтры под стратегию
-MIN_VOLUME_24H = 1500000       # От $1.5M суточного объема (в USDT)
+# Параметры фильтрации рынка
+MIN_VOLUME_24H = 1500000       # От $1.5M суточного объема
 THRESHOLD_PERCENT = 1.5        # Импульс от 1.5% за 15 минут
-MIN_LIQ_AMOUNT = 1500          # Ликвидации на Bybit от $1,500
+MIN_LIQ_AMOUNT = 1500          # Ликвидации от $1,500
 
 CHECK_INTERVAL_SECONDS = 60    # Проверка каждую минуту
 
@@ -124,9 +124,9 @@ def send_liq_alert(symbol, side, amount_usd, price):
         print(f"Ошибка ТГ ликвидаций: {e}", flush=True)
 
 if __name__ == "__main__":
-    print("=== Единый Скринер запущен с новым чистым токеном ===", flush=True)
+    print("=== Единый Скринер запущен с родным токеном ===", flush=True)
     
-    # ТЕСТОВЫЙ СИГНАЛ ПРИ СТАРТЕ ДЛЯ ПРОВЕРКИ СВЯЗИ
+    # ТЕСТОВОЕ СООБЩЕНИЕ ПРИ ЗАПУСКЕ
     try:
         bot.send_message(CHAT_ID, "🚀 **Скринер успешно запущен и подключен к каналу!**\nНачинаю сбор истории цен (15 минут)...", parse_mode="Markdown")
         print("Тестовое сообщение успешно отправлено в Telegram.", flush=True)
@@ -141,7 +141,6 @@ if __name__ == "__main__":
                     symbol = item["symbol"]
                     if not symbol.endswith("-USDT"): continue
                     
-                    # Фильтруем строго по объёму в USDT (quote volume)
                     volume = float(item.get("volume24h_quote", item.get("volume24h", 0)))
                     if volume < MIN_VOLUME_24H: continue
                         
