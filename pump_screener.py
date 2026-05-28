@@ -1,8 +1,7 @@
 import time
 import requests
 import threading
-import http.server
-import socketserver
+import socket
 from pybit.unified_trading import HTTP
 
 # ==============================================================================
@@ -11,12 +10,12 @@ from pybit.unified_trading import HTTP
 TOKEN = "8941415221:AAEUvX08QacNeWRNVcH_UmfW2GuVOBHW0cg"
 CHAT_ID = "@alexey_pump_alerts_new"
 
-LONG_TRIGGER = 0.01       # Сигнал сработает при изменении ВСЕГО на +0.01%
-SHORT_TRIGGER = 0.01      # Сигнал сработает при изменении ВСЕГО на -0.01%
-MIN_VOLUME_M = 0.0        # Фильтр объема полностью отключен
+LONG_TRIGGER = 0.01       # Срабатывает мгновенно при минимальном изменении
+SHORT_TRIGGER = 0.01      
+MIN_VOLUME_M = 0.0        # Без фильтра по объему
 
 LAST_SIGNAL_TIMES = {}
-SIGNAL_COOLDOWN = 10      # Снижаем кулдаун до 10 секунд для теста
+SIGNAL_COOLDOWN = 10      
 # ==============================================================================
 
 session = HTTP(testnet=False)
@@ -43,13 +42,32 @@ def get_bybit_data():
         pass
     return []
 
+# Функция веб-сервера на сокетах, которая отвечает Render в фоновом потоке
+def respond_to_render_pings():
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        server_socket.bind(("0.0.0.0", 10000))
+        server_socket.listen(5)
+        print("🖥️ Фоновый сокет-сервер запущен на порту 10000")
+        
+        while True:
+            client_sock, addr = server_socket.accept()
+            # Читаем запрос от Render, чтобы закрыть соединение корректно
+            client_sock.recv(1024) 
+            # Отправляем стандартный HTTP ответ 200 OK
+            response = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK"
+            client_sock.sendall(response)
+            client_sock.close()
+    except Exception as e:
+        print(f"Ошибка сокет-сервера: {e}")
+
 def main_scanner_loop():
-    # Даем веб-серверу 15 секунд на прохождение всех проверок Render
-    time.sleep(15)
-    
     prices_history = {}
-    print("🚀 Сканер рынка запущен. Начинаю накопление 5-минутной истории...")
-    send_telegram_message("🤖 Бот-радар успешно зафиксирован на сервере. Сбор данных начался!")
+    print("🚀 Сканер рынка запущен напрямую в основном потоке!")
+    
+    # Сразу шлем тестовую отмашку в Телеграм
+    send_telegram_message("🤖 Бот успешно запущен на Render! Начинаю форсированный тест связи...")
     
     while True:
         tickers = get_bybit_data()
@@ -67,13 +85,9 @@ def main_scanner_loop():
                 if symbol not in prices_history:
                     prices_history[symbol] = []
                 
-                # Добавляем цену с меткой времени
                 prices_history[symbol].append((current_time, current_price))
-                
-                # Удаляем данные старше 5 минут (300 секунд)
                 prices_history[symbol] = [p for p in prices_history[symbol] if current_time - p[0] <= 300]
                 
-                # Берем самую старую цену за 5 минут для вычисления процента
                 old_price = prices_history[symbol][0][1]
                 if old_price == 0:
                     continue
@@ -94,44 +108,30 @@ def main_scanner_loop():
                         
                         if is_long:
                             msg = (
-                                f"🟢 *ИМПУЛЬС ВВЕРХ* 📈\n\n"
-                                f"🔹 *Монета:* #{clean_symbol} (BingX)\n"
-                                f"📊 *Изменение за 5м:* +{price_change:.2f}%\n"
-                                f"💰 *Цена:* {current_price}\n"
-                                f"💵 *Объем 24h:* {volume_24h:.2f}M USDT\n\n"
-                                f"🔗 [Открыть график {clean_symbol} на Coinglass]({coinglass_url})"
+                                f"🟢 *ТЕСТ ПАМП* 📈\n\n"
+                                f"🔹 *Монета:* #{clean_symbol}\n"
+                                f"📊 *Изменение:* +{price_change:.2f}%\n"
+                                f"💰 *Цена:* {current_price}"
                             )
                         else:
                             msg = (
-                                f"🔴 *ИМПУЛЬС ВНИЗ* 📉\n\n"
-                                f"🔹 *Монета:* #{clean_symbol} (BingX)\n"
-                                f"📊 *Изменение за 5м:* {price_change:.2f}%\n"
-                                f"💰 *Цена:* {current_price}\n"
-                                f"💵 *Объем 24h:* {volume_24h:.2f}M USDT\n\n"
-                                f"🔗 [Открыть график {clean_symbol} на Coinglass]({coinglass_url})"
+                                f"🔴 *ТЕСТ ДАМП* 📉\n\n"
+                                f"🔹 *Монета:* #{clean_symbol}\n"
+                                f"📊 *Изменение:* {price_change:.2f}%\n"
+                                f"💰 *Цена:* {current_price}"
                             )
                         
                         LAST_SIGNAL_TIMES[symbol] = current_time
                         send_telegram_message(msg)
-                        print(f"✅ Сигнал по {clean_symbol} отправлен!")
+                        print(f"✅ Тестовый сигнал отправлен по {clean_symbol}")
                         
-        time.sleep(15)
-
-class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"OK")
-    def log_message(self, format, *args):
-        return 
-
-def run_web_server():
-    with socketserver.TCPServer(("0.0.0.0", 10000), HealthCheckHandler) as httpd:
-        httpd.serve_forever()
+        time.sleep(10)
 
 if __name__ == "__main__":
-    # Запускаем веб-сервер для удержания деплоя в отдельном потоке
-    threading.Thread(target=run_web_server, daemon=True).start()
-    # Запускаем основной цикл сканирования
+    # 1. Запускаем обслуживание пингов Render в изолированном ФОНОВОМ потоке
+    render_thread = threading.Thread(target=respond_to_render_pings, daemon=True)
+    render_thread.start()
+    
+    # 2. ОСНОВНОЙ поток полностью отдаем под сканирование Bybit без блокировок
     main_scanner_loop()
+    
