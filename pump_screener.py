@@ -7,7 +7,7 @@ import http.server
 import threading
 
 # ==========================================
-# --- БЛОК 1: НАСТРОЙКИ (ВСЁ ВКЛЮЧЕНО) ---
+# --- БЛОК 1: НАСТРОЙКИ (МАКСИМАЛЬНАЯ ЧУВСТВИТЕЛЬНОСТЬ) ---
 # ==========================================
 
 TELEGRAM_TOKEN = "7294451636:AAH0vH2ayzopTG2atZEezEa5PWkvKMV_Sxs" 
@@ -16,19 +16,19 @@ CHAT_ID = "-1003714825454"
 BINGX_URL = "https://open-api.bingx.com/openApi/swap/v2/quote/ticker"
 BYBIT_URL = "https://api.bybit.com"
 
-# --- МЯГКИЕ ФИЛЬТРЫ ДЛЯ ЧАСТЫХ СИГНАЛОВ ---
-MIN_VOLUME_24H = 5000000      # Снизили до $5M (поймает гораздо больше монет)
-THRESHOLD_PERCENT = 2.5       # Импульс от 2.5% 
-MIN_LIQ_AMOUNT = 5000         # Ликвидации от $5,000 (вместо $10k)
+# --- ФИЛЬТРЫ ПОД ТВОЮ СТРАТЕГИЮ (СТОП 2% / ТЕЙК 3-4%) ---
+MIN_VOLUME_24H = 3000000       # Снизили до $3M, чтобы ловить утренние пампы
+THRESHOLD_PERCENT = 2.2        # Триггер от 2.2% (успеешь зайти в начале импульса)
+MIN_LIQ_AMOUNT = 3000          # Крупные ликвидации Bybit от $3,000
 
-CHECK_INTERVAL_SECONDS = 120  # Проверка каждые 2 минуты (оптимально для API)
+CHECK_INTERVAL_SECONDS = 60    # Проверка каждую минуту
 
 # ==========================================
 # --- БЛОК 2: ЗАПУСК ВЕБ-СЕРВЕРА ДЛЯ RENDER ---
 # ==========================================
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
-previous_prices = {}
+price_history = {}  # Хранилище цен: {symbol: [список_цен_за_5_минут]}
 last_alerts = {}
 
 def start_simple_http_server():
@@ -45,7 +45,7 @@ def start_simple_http_server():
 threading.Thread(target=start_simple_http_server, daemon=True).start()
 
 # ==========================================
-# --- БЛОК 3: ЛОГИКА СKРИНЕРОВ ---
+# --- БЛОК 3: ЛОГИКА СКРИНЕРОВ ---
 # ==========================================
 
 def get_bingx_tickers():
@@ -54,24 +54,12 @@ def get_bingx_tickers():
         if response.status_code == 200:
             data = response.json()
             if data.get("code") == 0:
-                tickers = data.get("data", [])
-                result = {}
-                for item in tickers:
-                    symbol = item["symbol"]
-                    if symbol.endswith("-USDT"):
-                        clean_symbol = symbol.replace("-USDT", "USDT")
-                        volume = float(item.get("volume24h", item.get("volume24h_quote", 0)))
-                        result[clean_symbol] = {
-                            "price": float(item["lastPrice"]),
-                            "volume": volume
-                        }
-                return result
+                return data.get("data", [])
     except Exception as e:
         print(f"Ошибка BingX API: {e}", flush=True)
     return None
 
 def check_bybit_liquidations():
-    """Проверяет крупные ликвидации на Bybit"""
     url = f"{BYBIT_URL}/v5/market/recent-trade?category=linear&baseCoin=USDT&limit=50"
     try:
         res = requests.get(url, timeout=10)
@@ -84,7 +72,7 @@ def check_bybit_liquidations():
             symbol = trade.get("symbol")
             current_time = time.time()
             
-            if symbol in last_alerts and current_time - last_alerts[symbol] < 120:
+            if symbol in last_alerts and current_time - last_alerts[symbol] < 60:
                 continue
                 
             price = float(trade.get("price", 0))
@@ -96,25 +84,26 @@ def check_bybit_liquidations():
                 send_liq_alert(symbol, side, amount_usd, price)
                 last_alerts[symbol] = current_time
     except Exception as e:
-        print(f"Ошибка ликв Bybit: {e}", flush=True)
+        print(f"Ошибка ликвидаций Bybit: {e}", flush=True)
 
 def send_pump_alert(symbol, change, price, volume):
     emoji = "🟢 ИМПУЛЬС ВВЕРХ 📈" if change > 0 else "🔴 ИМПУЛЬС ВНИЗ 📉"
     formatted_vol = f"${volume/1_000_000:.2f}M"
-    clean_symbol = symbol.replace("USDT", "")
+    clean_symbol = symbol.replace("USDT", "").replace("-USDT", "")
     dynamic_link = f"https://www.coinglass.com/tv/BingX_{clean_symbol}USDT"
     
     message = (
         f"{emoji}\n\n"
         f"🔹 **Монета:** #{clean_symbol} (BingX)\n"
-        f"📊 **Движение:** {change:+.2f}%\n"
+        f"📊 **Движение (до 5 мин):** {change:+.2f}%\n"
         f"💰 **Цена:** {price:.8f}".rstrip('0').rstrip('.') + "\n"
         f"💰 **Объем 24h:** {formatted_vol}\n\n"
         f"🔗 [График {clean_symbol} на Coinglass]({dynamic_link})"
     )
     try:
         bot.send_message(CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
-    except Exception as e: print(f"Ошибка ТГ: {e}")
+    except Exception as e: 
+        print(f"Ошибка отправки в ТГ: {e}", flush=True)
 
 def send_liq_alert(symbol, side, amount_usd, price):
     emoji = "🩸 ЛОНГ ЛИКВИДАЦИЯ 🩸" if side.lower() == "sell" else "🔥 ШОРТ ЛИКВИДАЦИЯ 🔥"
@@ -130,35 +119,55 @@ def send_liq_alert(symbol, side, amount_usd, price):
     )
     try:
         bot.send_message(CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
-    except Exception as e: print(f"Ошибка ТГ ликв: {e}")
+    except Exception as e: 
+        print(f"Ошибка ТГ ликвидаций: {e}", flush=True)
 
 if __name__ == "__main__":
-    print("=== Единый Скринер (Пампы + Ликвидации) запущен ===", flush=True)
+    print("=== Единый Скринер (Пампы с памятью + Ликвидации) запущен ===", flush=True)
     
+    # Первичная инициализация базы цен
     tickers = get_bingx_tickers()
     if tickers:
-        for symbol, data in tickers.items():
-            previous_prices[symbol] = data["price"]
-            
+        for item in tickers:
+            symbol = item["symbol"]
+            if symbol.endswith("-USDT"):
+                price_history[symbol] = [float(item["lastPrice"])]
+                
     while True:
         try:
-            # 1. Проверка Пампов (BingX)
-            current_tickers = get_bingx_tickers()
-            if current_tickers:
-                for symbol, current_data in current_tickers.items():
-                    if current_data["volume"] < MIN_VOLUME_24H:
-                        continue
-                    if symbol in previous_prices:
-                        old_price = previous_prices[symbol]
-                        new_price = current_data["price"]
-                        if old_price == 0: continue
+            # 1. Анализ Пампов BingX
+            tickers = get_bingx_tickers()
+            if tickers:
+                for item in tickers:
+                    symbol = item["symbol"]
+                    if not symbol.endswith("-USDT"): continue
                         
-                        price_change = ((new_price - old_price) / old_price) * 100
-                        if abs(price_change) >= THRESHOLD_PERCENT:
-                            send_pump_alert(symbol, price_change, new_price, current_data["volume"])
-                    previous_prices[symbol] = current_data["price"]
+                    volume = float(item.get("volume24h", item.get("volume24h_quote", 0)))
+                    if volume < MIN_VOLUME_24H: continue
+                        
+                    new_price = float(item["lastPrice"])
+                    
+                    if symbol in price_history and len(price_history[symbol]) > 0:
+                        # Сравниваем текущую цену с САМОЙ СТАРОЙ ценой в истории (5 минут назад)
+                        old_price = price_history[symbol][0]
+                        if old_price > 0:
+                            price_change = ((new_price - old_price) / old_price) * 100
+                            
+                            if abs(price_change) >= THRESHOLD_PERCENT:
+                                current_time = time.time()
+                                if symbol not in last_alerts or current_time - last_alerts[symbol] > 300:
+                                    send_pump_alert(symbol, price_change, new_price, volume)
+                                    last_alerts[symbol] = current_time
+                                    
+                        # Добавляем новую цену в историю
+                        price_history[symbol].append(new_price)
+                        # Храним только последние 5 замеров (5 минут)
+                        if len(price_history[symbol]) > 5:
+                            price_history[symbol].pop(0)
+                    else:
+                        price_history[symbol] = [new_price]
             
-            # 2. Проверка Ликвидаций (Bybit)
+            # 2. Анализ Ликвидаций Bybit
             check_bybit_liquidations()
             
         except Exception as e:
