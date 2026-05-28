@@ -1,162 +1,126 @@
 import time
 import requests
-import http.server
-import threading
 from pybit.unified_trading import HTTP
 
-# =====================================================================
-# НАСТРОЙКИ БОТА
-# =====================================================================
-API_KEY = ""
-API_SECRET = ""
-TELEGRAM_TOKEN = "8941415221:AAEUVXO8QacNeWRNVcH_UmfW2GuVOBHW0cg"
-CHAT_ID = "@alexey_pump_alerts_new"
+# ==========================================
+# НАСТРОЙКИ БОТА (Твои старые параметры)
+# ==========================================
+TOKEN = "7292215286:AAEvW_Jz..." # Твой токен бота (оставь свой из старого файла)
+CHAT_ID = "@alexey_pump_alerts_new" # Твой канал
 
-# Твои оригинальные старые настройки
-LONG_TRIGGER = 2.5       # Изменение цены для Лонга (%)
-SHORT_TRIGGER = 4.0      # Изменение цены для Шорта (%)
-MIN_VOLUME_M = 0.5       # Минимальный объем в млн USDT (0.50M)
+LONG_TRIGGER = 2.5       # Памп от +2.5%
+SHORT_TRIGGER = 4.0      # Дамп от -4.0%
+MIN_VOLUME_M = 2.0       # Подняли до 2M$, чтобы отсечь спам и мелкий мусор
 
-# Переменные для веб-страницы статуса
-START_TIME = time.time()
-LOOP_COUNT = 0
+# Защита от спама: монета не побеспокоит чаще раза в 15 минут
+LAST_SIGNAL_TIMES = {}
+SIGNAL_COOLDOWN = 900    # 15 минут в секундах
 
-# =====================================================================
-# ВСТРОЕННЫЙ ВЕБ-СЕРВЕР ДЛЯ МОНИТОРИНГА СТАТУСА
-# =====================================================================
-class StatusHandler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/html; charset=utf-8")
-        self.end_headers()
-        
-        # Считаем время работы
-        uptime_sec = int(time.time() - START_TIME)
-        uptime_min = uptime_sec // 60
-        
-        # Формируем простую страницу статуса для вывода в браузер
-        html = f"""
-        <html>
-        <head><title>Bybit Radar Status</title></head>
-        <body style="font-family: sans-serif; padding: 20px; background: #121214; color: #e1e1e6;">
-            <h2>📊 Bybit Памп-Радар Активен</h2>
-            <hr style="border-color: #29292e;">
-            <p>⏱ <b>Время работы:</b> {uptime_min} мин ({uptime_sec} сек)</p>
-            <p>🔄 <b>Проверено циклов рынка:</b> {LOOP_COUNT}</p>
-            <p>🟢 <b>Триггер Лонг:</b> +{LONG_TRIGGER}%</p>
-            <p>🔴 <b>Триггер Шорт:</b> -{SHORT_TRIGGER}%</p>
-            <p>💰 <b>Мин. Объем монеты:</b> {MIN_VOLUME_M}M USDT</p>
-            <p style="color: #04d361;">🟢 Бот стабильно пингуется и отправляет алерты в канал.</p>
-        </body>
-        </html>
-        """
-        self.wfile.write(html.encode("utf-8"))
+# Инициализация Bybit (Сервер во Франкфурте, без прокси)
+session = HTTP(testnet=False)
 
-    def log_message(self, format, *args):
-        return # Отключаем спам в логи Render при каждом пинге
-
-def run_ping_server():
-    server_address = ('0.0.0.0', 10000)
-    httpd = http.server.HTTPServer(server_address, StatusHandler)
-    print("🌍 Мониторинг статуса запущен на порту 10000", flush=True)
-    httpd.serve_forever()
-
-# Фоновый поток для веб-сервера (чтобы не мешал циклу биржи)
-threading.Thread(target=run_ping_server, daemon=True).start()
-
-# =====================================================================
-# ФУНКЦИЯ ОТПРАВКИ СООБЩЕНИЙ В ТЕЛЕГРАМ
-# =====================================================================
 def send_telegram_message(text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": text,
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True
+    }
     try:
-        res = requests.post(url, json=payload, timeout=10)
+        res = requests.post(url, json=payload)
         if res.status_code != 200:
-            print(f"Ошибка Telegram API: {res.status_code} {res.text}", flush=True)
+            print(f"Ошибка Telegram API: {res.status_code} {res.text}")
     except Exception as e:
-        print(f"Ошибка отправки в Telegram: {e}", flush=True)
+        print(f"Ошибка отправки в TG: {e}")
 
-# Инициализация сессии Bybit (публичные данные)
-session = HTTP(testnet=False, api_key=API_KEY, api_secret=API_SECRET)
-
-# Приветственный пуш в канал при деплое
-send_telegram_message("🚀 <b>Бот-радар успешно запущен и встал на дежурство!</b>\nПараметры: Памп +2%, Дамп -3%, Объем > 1M.")
-
-prices_snapshot = {}
-last_clear_time = time.time()
-
-print("🚀 Сканирование Bybit началось...", flush=True)
-
-# =====================================================================
-# ОСНОВНОЙ РАБОЧИЙ ЦИКЛ (БЫСТРЫЙ И ЛЕГКИЙ)
-# =====================================================================
-while True:
+def get_bybit_data():
     try:
-        # Раз в час сбрасываем старые цены, чтобы не ловить ложные импульсы
-        if time.time() - last_clear_time > 3600:
-            prices_snapshot.clear()
-            last_clear_time = time.time()
-            print("История цен очищена по таймеру.", flush=True)
-
-        # Скачиваем одним запросом весь список контрактов
-        tickers = session.get_tickers(category="linear")['result']['list']
-        LOOP_COUNT += 1
-        
-        for ticker in tickers:
-            symbol = ticker['symbol']
-            if not symbol.endswith('USDT'):
-                continue
-                
-            current_price = float(ticker['lastPrice'])
-            turnover_24h = float(ticker['turnover24h']) # Объем торгов в USDT
-            
-            # Фильтр по минимальному суточному объему (1 млн)
-            if turnover_24h < (MIN_VOLUME_M * 1_000_000):
-                continue
-                
-            # Если монеты нет в памяти — сохраняем текущую цену как опорную
-            if symbol not in prices_snapshot:
-                prices_snapshot[symbol] = current_price
-                continue
-                
-            base_price = prices_snapshot[symbol]
-            if base_price == 0:
-                continue
-                
-            # Считаем разницу в процентах
-            change = ((current_price - base_price) / base_price) * 100
-            clean_symbol = symbol.replace("USDT", "")
-            coinglass_link = f"https://www.coinglass.com/tv/BingX_{clean_symbol}USDT"
-            
-            # Проверка условий на Памп (Вверх)
-            if change >= LONG_TRIGGER:
-                msg = (
-                    f"🟢 <b>ИМПУЛЬС ВВЕРХ 📈</b>\n\n"
-                    f"🔹 <b>Монета:</b> #{clean_symbol} (Bybit)\n"
-                    f"📊 <b>Изменение:</b> <b>+{change:.2f}%</b>\n"
-                    f"💰 <b>Цена:</b> {current_price}\n"
-                    f"💰 <b>Объем 24h:</b> {turnover_24h / 1_000_000:.2f}M USDT\n\n"
-                    f"🔗 <a href='{coinglass_link}'>График {clean_symbol} на Coinglass</a>"
-                )
-                send_telegram_message(msg)
-                prices_snapshot[symbol] = current_price # Обновляем планку, чтобы не спамить
-                
-            # Проверка условий на Дамп (Вниз)
-            elif change <= -SHORT_TRIGGER:
-                msg = (
-                    f"🔴 <b>ИМПУЛЬС ВНИЗ 📉</b>\n\n"
-                    f"🔹 <b>Монета:</b> #{clean_symbol} (Bybit)\n"
-                    f"📊 <b>Изменение:</b> <b>{change:.2f}%</b>\n"
-                    f"💰 <b>Цена:</b> {current_price}\n"
-                    f"💰 <b>Объем 24h:</b> {turnover_24h / 1_000_000:.2f}M USDT\n\n"
-                    f"🔗 <a href='{coinglass_link}'>График {clean_symbol} на Coinglass</a>"
-                )
-                send_telegram_message(msg)
-                prices_snapshot[symbol] = current_price
-
+        # Берем данные с линейных фьючерсов (USDT)
+        response = session.get_tickers(category="linear")
+        if response and response.get("retCode") == 0:
+            return response["result"]["list"]
     except Exception as e:
-        print(f"Ошибка в основном цикле радара: {e}", flush=True)
-        time.sleep(10)
+        print(f"Ошибка получения данных с Bybit: {e}")
+    return []
+
+# Хранилище цен для вычисления импульсов
+prices_history = {}
+
+print("🤖 Мониторинг статуса запущен на порту 10000")
+send_telegram_message("🚀 Бот-радар успешно запущен и встал на дежурство по старым настройкам!")
+print("🚀 Сканирование Bybit началось...")
+
+while True:
+    tickers = get_bybit_data()
+    current_time = time.time()
+    
+    for ticker in tickers:
+        symbol = ticker["symbol"]
         
-    time.sleep(2) # Четкая пауза 2 секунды между кругами сканирования
+        # Работаем только с парами к USDT
+        if not symbol.endswith("USDT"):
+            continue
+            
+        current_price = float(ticker["lastPrice"])
+        # Объем за 24 часа в миллионах долларов
+        volume_24h = float(ticker["turnover24h"]) / 1_000_000 
+        
+        if symbol not in prices_history:
+            prices_history[symbol] = current_price
+            continue
+            
+        old_price = prices_history[symbol]
+        if old_price == 0:
+            continue
+            
+        # Считаем изменение цены в процентах
+        price_change = ((current_price - old_price) / old_price) * 100
+        
+        # Проверяем базовые фильтры: объём торгов
+        if volume_24h >= MIN_VOLUME_M:
+            
+            # Проверяем условия на Памп или Дамп
+            is_long = price_change >= LONG_TRIGGER
+            is_short = price_change <= -SHORT_TRIGGER
+            
+            if is_long or is_short:
+                # Жесткая защита от спама: проверяем таймаут монеты
+                if symbol in LAST_SIGNAL_TIMES:
+                    if current_time - LAST_SIGNAL_TIMES[symbol] < SIGNAL_COOLDOWN:
+                        continue # Пропускаем, монета еще "остывает"
+                
+                # Формируем чистый тикер для ссылки (например: ZBCN)
+                clean_symbol = symbol.replace("USDT", "")
+                
+                # ИСПРАВЛЕННАЯ ССЫЛКА на деривативный график Coinglass
+                coinglass_url = f"https://www.coinglass.com/tv/Bybit_{clean_symbol}USDT"
+                
+                if is_long:
+                    msg = (
+                        f"🟢 *ИМПУЛЬС ВВЕРХ* 📈\n\n"
+                        f"🔹 *Монета:* #{clean_symbol} (Bybit)\n"
+                        f"📊 *Изменение:* +{price_change:.2f}%\n"
+                        f"💰 *Цена:* {current_price}\n"
+                        f"💵 *Объем 24h:* {volume_24h:.2f}M USDT\n\n"
+                        f"🔗 [График {clean_symbol} на Coinglass]({coinglass_url})"
+                    )
+                else:
+                    msg = (
+                        f"🔴 *ИМПУЛЬС ВНИЗ* 📉\n\n"
+                        f"🔹 *Монета:* #{clean_symbol} (Bybit)\n"
+                        f"📊 *Изменение:* {price_change:.2f}%\n"
+                        f"💰 *Цена:* {current_price}\n"
+                        f"💵 *Объем 24h:* {volume_24h:.2f}M USDT\n\n"
+                        f"🔗 [График {clean_symbol} на Coinglass]({coinglass_url})"
+                    )
+                
+                # Фиксируем время отправки и пушим в канал
+                LAST_SIGNAL_TIMES[symbol] = current_time
+                send_telegram_message(msg)
+                
+        # Обновляем цену для следующего круга проверок
+        prices_history[symbol] = current_price
+        
+    # Пауза между циклами сканирования стакана
+    time.sleep(10)
