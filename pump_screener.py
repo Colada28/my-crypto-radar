@@ -7,7 +7,7 @@ import http.server
 import threading
 
 # ==========================================
-# --- БЛОК 1: НАСТРОЙКИ (ПОВЫШЕННАЯ ЧУВСТВИТЕЛЬНОСТЬ) ---
+# --- БЛОК 1: НАСТРОЙКИ ---
 # ==========================================
 
 TELEGRAM_TOKEN = "7294451636:AAH0vH2ayzopTG2atZEezEa5PWkvKMV_Sxs" 
@@ -16,10 +16,10 @@ CHAT_ID = "-1003714825454"
 BINGX_URL = "https://open-api.bingx.com/openApi/swap/v2/quote/ticker"
 BYBIT_URL = "https://api.bybit.com"
 
-# --- МЯГКИЕ ФИЛЬТРЫ ДЛЯ АКТИВНЫХ СИГНАЛОВ ---
-MIN_VOLUME_24H = 2000000       # Снизили до $2M (поймает больше щиткоинов)
-THRESHOLD_PERCENT = 1.6        # Триггер от 1.6% (идеально для захода под тейк 3-4%)
-MIN_LIQ_AMOUNT = 2000          # Ликвидации Bybit от $2,000
+# Мягкие и точные фильтры
+MIN_VOLUME_24H = 1500000       # Полтора миллиона USDT суточного объема
+THRESHOLD_PERCENT = 1.5        # Импульс от 1.5% за 15 минут
+MIN_LIQ_AMOUNT = 1500          # Ликвидации на Bybit от $1,500
 
 CHECK_INTERVAL_SECONDS = 60    # Проверка каждую минуту
 
@@ -123,7 +123,14 @@ def send_liq_alert(symbol, side, amount_usd, price):
         print(f"Ошибка ТГ ликвидаций: {e}", flush=True)
 
 if __name__ == "__main__":
-    print("=== Единый Скринер (Повышенная чувствительность 15м) запущен ===", flush=True)
+    print("=== Единый Скринер запущен ===", flush=True)
+    
+    # ТЕСТОВЫЙ СИГНАЛ ПРИ СТАРТЕ ДЛЯ ПРОВЕРКИ СВЯЗИ
+    try:
+        bot.send_message(CHAT_ID, "🚀 **Скринер успешно запущен и подключен к каналу!**\nНачинаю сбор истории цен (15 минут)...", parse_mode="Markdown")
+        print("Тестовое сообщение успешно отправлено в Telegram.", flush=True)
+    except Exception as e:
+        print(f"Критическая ошибка проверки Telegram при старте: {e}", flush=True)
     
     while True:
         try:
@@ -132,8 +139,9 @@ if __name__ == "__main__":
                 for item in tickers:
                     symbol = item["symbol"]
                     if not symbol.endswith("-USDT"): continue
-                        
-                    volume = float(item.get("volume24h", item.get("volume24h_quote", 0)))
+                    
+                    # Фильтруем строго по объёму в USDT (quote volume)
+                    volume = float(item.get("volume24h_quote", item.get("volume24h", 0)))
                     if volume < MIN_VOLUME_24H: continue
                         
                     new_price = float(item["lastPrice"])
@@ -143,9 +151,8 @@ if __name__ == "__main__":
                     
                     price_history[symbol].append(new_price)
                     
-                    # Теперь храним историю за 15 минут, чтобы замечать плавный разгон
                     if len(price_history[symbol]) >= 15:
-                        old_price = price_history[symbol][0] # Цена 15 минут назад
+                        old_price = price_history[symbol][0]
                         if old_price > 0:
                             price_change = ((new_price - old_price) / old_price) * 100
                             
@@ -160,6 +167,6 @@ if __name__ == "__main__":
             check_bybit_liquidations()
             
         except Exception as e:
-            print(f"Критическая ошибка: {e}", flush=True)
+            print(f"Критическая ошибка в основном цикле: {e}", flush=True)
             
         time.sleep(CHECK_INTERVAL_SECONDS)
