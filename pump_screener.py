@@ -10,7 +10,7 @@ from pybit.unified_trading import HTTP
 API_KEY = ""
 API_SECRET = ""
 TELEGRAM_TOKEN = "8941415221:AAEUVXO8QacNeWRNVcH_UmfW2GuVOBHW0cg"
-CHAT_ID = "-1003714825454"
+CHAT_ID = "@alexey_pump_alerts_new"
 
 # Твои актуальные фильтры
 LONG_TRIGGER = 2.0       # Памп от +2.0%
