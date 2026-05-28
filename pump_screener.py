@@ -1,50 +1,22 @@
 import time
 import requests
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pybit.unified_trading import HTTP
 
 # ==============================================================================
-# НАСТРОЙКИ БОТА
-# ==============================================================================
-# ==============================================================================
-# ВРЕМЕННЫЕ ТЕСТОВЫЕ НАСТРОЙКИ ДЛЯ ПРОВЕРКИ СИГНАЛОВ
+# НАСТРОЙКИ БОТА (Чувствительные для теста)
 # ==============================================================================
 TOKEN = "8941415221:AAEUvX08QacNeWRNVcH_UmfW2GuVOBHW0cg"
 CHAT_ID = "@alexey_pump_alerts_new"
 
-# Снижаем барьеры до минимума, чтобы пошли сигналы
-LONG_TRIGGER = 1.5       # Тестовый Памп от +1.5%
-SHORT_TRIGGER = 1.5      # Тестовый Дамп от -1.5%
-MIN_VOLUME_M = 0.1       # Объем торгов от 100 000 USDT
+LONG_TRIGGER = 1.5       # Памп от +1.5% за 5 минут
+SHORT_TRIGGER = 1.5      # Дамп от -1.5% за 5 минут
+MIN_VOLUME_M = 0.1       # Объем от 100к USDT
 
 LAST_SIGNAL_TIMES = {}
-SIGNAL_COOLDOWN = 300    # Снижаем паузу до 5 минут, чтобы увидеть больше сигналов
+SIGNAL_COOLDOWN = 300    # Кулдаун 5 минут
 # ==============================================================================
-# ==============================================================================
 
-# ФЕЙКОВЫЙ ВЕБ-СЕРВЕР ДЛЯ ОБМАНА RENDER
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"Bot is alive")
-    def log_message(self, format, *args):
-        return  # Отключаем спам логов сервера
-
-def run_health_server():
-    try:
-        server = HTTPServer(('0.0.0.0', 10000), HealthCheckHandler)
-        print("🖥️ Фейковый веб-сервер запущен на порту 10000 для Render")
-        server.serve_forever()
-    except Exception as e:
-        print(f"Ошибка веб-сервера: {e}")
-
-# Запуск веб-сервера в отдельном потоке, чтобы он не мешал боту
-threading.Thread(target=run_health_server, daemon=True).start()
-
-# Подключение к API
 session = HTTP(testnet=False)
 
 def send_telegram_message(text):
@@ -56,81 +28,102 @@ def send_telegram_message(text):
         "disable_web_page_preview": False
     }
     try:
-        res = requests.post(url, json=payload)
-    except Exception as e:
-        print(f"Ошибка отправки в TG: {e}")
+        requests.post(url, json=payload, timeout=5)
+    except:
+        pass
 
 def get_bybit_data():
     try:
         response = session.get_tickers(category="linear")
         if response and response.get("retCode") == 0:
             return response["result"]["list"]
-    except Exception as e:
-        print(f"Ошибка получения тикеров: {e}")
+    except:
+        pass
     return []
 
-prices_history = {}
-send_telegram_message("🚀 Бот-радар запущен! Проверка портов пройдена. Линки BingX активны.")
-print("🚀 Сканирование рынка началось...")
-
-while True:
-    tickers = get_bybit_data()
-    current_time = time.time()
+def main_scanner_loop():
+    # Храним списки цен за последние 5 минут (300 секунд)
+    prices_history = {} 
+    print("🚀 Фоновое сканирование рынка запущено...")
     
-    for ticker in tickers:
-        symbol = ticker["symbol"]
-        if not symbol.endswith("USDT"):
-            continue
-            
-        current_price = float(ticker["lastPrice"])
-        volume_24h = float(ticker["turnover24h"]) / 1_000_000 
+    while True:
+        tickers = get_bybit_data()
+        current_time = time.time()
         
-        if symbol not in prices_history:
-            prices_history[symbol] = current_price
-            continue
+        for ticker in tickers:
+            symbol = ticker["symbol"]
+            if not symbol.endswith("USDT"):
+                continue
+                
+            current_price = float(ticker["lastPrice"])
+            volume_24h = float(ticker["turnover24h"]) / 1_000_000 
             
-        old_price = prices_history[symbol]
-        if old_price == 0:
-            continue
+            if symbol not in prices_history:
+                prices_history[symbol] = []
             
-        price_change = ((current_price - old_price) / old_price) * 100
-        
-        if volume_24h >= MIN_VOLUME_M:
-            is_long = price_change >= LONG_TRIGGER
-            is_short = price_change <= -SHORT_TRIGGER
+            # Добавляем текущую цену с меткой времени
+            prices_history[symbol].append((current_time, current_price))
             
-            if is_long or is_short:
-                if symbol in LAST_SIGNAL_TIMES:
-                    if current_time - LAST_SIGNAL_TIMES[symbol] < SIGNAL_COOLDOWN:
-                        continue
+            # Очищаем старые данные (старше 5 минут)
+            prices_history[symbol] = [p for p in prices_history[symbol] if current_time - p[0] <= 300]
+            
+            # Нам нужна самая старая цена за эти 5 минут для сравнения
+            old_price = prices_history[symbol][0][1]
+            
+            if old_price == 0:
+                continue
                 
-                clean_symbol = symbol.replace("USDT", "")
+            price_change = ((current_price - old_price) / old_price) * 100
+            
+            if volume_24h >= MIN_VOLUME_M:
+                is_long = price_change >= LONG_TRIGGER
+                is_short = price_change <= -SHORT_TRIGGER
                 
-                # ИСПРАВЛЕННАЯ ССЫЛКА НА ПРО-ГРАФИКИ ЛИКВИДАЦИЙ BINGX
-                coinglass_url = f"https://www.coinglass.com/pro/futures/LiquidationChart/BingX/{clean_symbol}"
-                
-                if is_long:
-                    msg = (
-                        f"🟢 *ИМПУЛЬС ВВЕРХ* 📈\n\n"
-                        f"🔹 *Монета:* #{clean_symbol} (BingX)\n"
-                        f"📊 *Изменение:* +{price_change:.2f}%\n"
-                        f"💰 *Цена:* {current_price}\n"
-                        f"💵 *Объем 24h:* {volume_24h:.2f}M USDT\n\n"
-                        f"🔗 [Открыть график {clean_symbol} на Coinglass]({coinglass_url})"
-                    )
-                else:
-                    msg = (
-                        f"🔴 *ИМПУЛЬС ВНИЗ* 📉\n\n"
-                        f"🔹 *Монета:* #{clean_symbol} (BingX)\n"
-                        f"📊 *Изменение:* {price_change:.2f}%\n"
-                        f"💰 *Цена:* {current_price}\n"
-                        f"💵 *Объем 24h:* {volume_24h:.2f}M USDT\n\n"
-                        f"🔗 [Открыть график {clean_symbol} на Coinglass]({coinglass_url})"
-                    )
-                
-                LAST_SIGNAL_TIMES[symbol] = current_time
-                send_telegram_message(msg)
-                
-        prices_history[symbol] = current_price
-        
-    time.sleep(10)
+                if is_long or is_short:
+                    if symbol in LAST_SIGNAL_TIMES:
+                        if current_time - LAST_SIGNAL_TIMES[symbol] < SIGNAL_COOLDOWN:
+                            continue
+                    
+                    clean_symbol = symbol.replace("USDT", "")
+                    coinglass_url = f"https://www.coinglass.com/pro/futures/LiquidationChart/BingX/{clean_symbol}"
+                    
+                    if is_long:
+                        msg = (
+                            f"🟢 *ИМПУЛЬС ВВЕРХ* 📈\n\n"
+                            f"🔹 *Монета:* #{clean_symbol} (BingX)\n"
+                            f"📊 *Изменение за 5м:* +{price_change:.2f}%\n"
+                            f"💰 *Цена:* {current_price}\n"
+                            f"💵 *Объем 24h:* {volume_24h:.2f}M USDT\n\n"
+                            f"🔗 [Открыть график {clean_symbol} на Coinglass]({coinglass_url})"
+                        )
+                    else:
+                        msg = (
+                            f"🔴 *ИМПУЛЬС ВНИЗ* 📉\n\n"
+                            f"🔹 *Монета:* #{clean_symbol} (BingX)\n"
+                            f"📊 *Изменение за 5м:* {price_change:.2f}%\n"
+                            f"💰 *Цена:* {current_price}\n"
+                            f"💵 *Объем 24h:* {volume_24h:.2f}M USDT\n\n"
+                            f"🔗 [Открыть график {clean_symbol} на Coinglass]({coinglass_url})"
+                        )
+                    
+                    LAST_SIGNAL_TIMES[symbol] = current_time
+                    send_telegram_message(msg)
+                    
+        time.sleep(10)
+
+# ЗАПУСК
+threading.Thread(target=main_scanner_loop, daemon=True).start()
+
+import http.server
+import socketserver
+
+class QuietHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+    def log_message(self, format, *args):
+        return
+
+with socketserver.TCPServer(("0.0.0.0", 10000), QuietHandler) as httpd:
+    httpd.serve_forever()
