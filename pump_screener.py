@@ -3,9 +3,10 @@ import requests
 import telebot
 
 # ==========================================
-# --- НАСТРОЙКИ (СТАРЫЙ ТОКЕН И КАНАЛ) ---
+# --- НАСТРОЙКИ (ТОКЕН НОВОГО БОТА ИЗ АДМИНОВ) ---
 # ==========================================
-TELEGRAM_TOKEN = "8834450636:AAEC-FohGV3UixvjoFWzYUhi4RWZsd6ZZsg" 
+# Токен бота Cash Pump Screener со скриншота 1000112137.jpg
+TELEGRAM_TOKEN = "8268691280:AAGhrZbF4okL7YxO8qm1sTXZI7azyQGA4zM" 
 CHAT_ID = "-1003714825454" 
 
 BINGX_URL = "https://open-api.bingx.com/openApi/swap/v2/quote/ticker"
@@ -22,7 +23,7 @@ price_history = {}
 last_alerts = {}
 
 # ==========================================
-# --- СТАРЫЙ РАБОЧИЙ ФУНКЦИОНАЛ ПАМПОВ ---
+# --- ФУНКЦИОНАЛ ПАМПОВ BINGX ---
 # ==========================================
 def get_bingx_tickers():
     try:
@@ -40,7 +41,6 @@ def send_pump_alert(symbol, change, price, volume):
     formatted_vol = f"${volume/1_000_000:.2f}M"
     
     clean_symbol = symbol.replace("USDT", "").replace("-USDT", "")
-    # Исправленная ссылка Coinglass без лишних дефисов
     dynamic_link = f"https://www.coinglass.com/tv/BingX_{clean_symbol}USDT"
     
     message = (
@@ -58,7 +58,7 @@ def send_pump_alert(symbol, change, price, volume):
         print(f"Ошибка отправки пампа: {e}", flush=True)
 
 # ==========================================
-# --- ДОБАВЛЕННЫЙ БЛОК ЛИКВИДАЦИЙ ---
+# --- БЛОК ЛИКВИДАЦИЙ BYBIT ---
 # ==========================================
 def check_bybit_liquidations():
     url = f"{BYBIT_URL}/v5/market/recent-trade?category=linear&baseCoin=USDT&limit=50"
@@ -106,17 +106,17 @@ def send_liq_alert(symbol, side, amount_usd, price):
         print(f"Ошибка отправки ликвидации: {e}", flush=True)
 
 # ==========================================
-# --- ОСНОВНОЙ ЦИКЛ СЛУЖБЫ ---
+# --- ОСНОВНОЙ ЦИКЛ ---
 # ==========================================
 if __name__ == "__main__":
-    print("=== Старый проверенный скринер запущен из pump_screener.py ===", flush=True)
+    print("=== Скринер запущен из pump_screener.py ===", flush=True)
     
     # Моментальный тест связи при старте скрипта
     try:
-        bot.send_message(CHAT_ID, "✅ Скринер успешно перезапущен в правильной структуре файлов! Связь с каналом есть.", parse_mode="Markdown")
+        bot.send_message(CHAT_ID, "✅ **Скринер успешно запущен!** Новый бот из админов проверил связь. Начинаю мониторинг рынка...", parse_mode="Markdown")
         print("Тестовый алерт успешно доставлен в Telegram.", flush=True)
     except Exception as e:
-        print(f"Ошибка отправки теста: {e}. Проверь, добавлен ли бот в канал.", flush=True)
+        print(f"Ошибка отправки теста: {e}.", flush=True)
 
     while True:
         try:
