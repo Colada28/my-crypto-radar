@@ -4,17 +4,17 @@ import threading
 from pybit.unified_trading import HTTP
 
 # ==============================================================================
-# НАСТРОЙКИ БОТА (Чувствительные для теста)
+# НАСТРОЙКИ БОТА
 # ==============================================================================
 TOKEN = "8941415221:AAEUvX08QacNeWRNVcH_UmfW2GuVOBHW0cg"
 CHAT_ID = "@alexey_pump_alerts_new"
 
-LONG_TRIGGER = 1.5       # Памп от +1.5% за 5 минут
-SHORT_TRIGGER = 1.5      # Дамп от -1.5% за 5 минут
+LONG_TRIGGER = 1.0       # Для теста снижаем до 1.0%
+SHORT_TRIGGER = 1.0      # Для теста снижаем до 1.0%
 MIN_VOLUME_M = 0.1       # Объем от 100к USDT
 
 LAST_SIGNAL_TIMES = {}
-SIGNAL_COOLDOWN = 300    # Кулдаун 5 минут
+SIGNAL_COOLDOWN = 300    
 # ==============================================================================
 
 session = HTTP(testnet=False)
@@ -29,26 +29,34 @@ def send_telegram_message(text):
     }
     try:
         requests.post(url, json=payload, timeout=5)
-    except:
-        pass
+    except Exception as e:
+        print(f"❌ Ошибка отправки в TG: {e}")
 
 def get_bybit_data():
     try:
         response = session.get_tickers(category="linear")
         if response and response.get("retCode") == 0:
             return response["result"]["list"]
-    except:
-        pass
+        else:
+            print(f"⚠️ API Bybit вернул код ответа: {response.get('retCode') if response else 'None'}")
+    except Exception as e:
+        print(f"❌ Критическая ошибка API Bybit: {e}")
     return []
 
 def main_scanner_loop():
-    # Храним списки цен за последние 5 минут (300 секунд)
     prices_history = {} 
-    print("🚀 Фоновое сканирование рынка запущено...")
+    print("🚀 Сканер рынка официально запущен!")
     
     while True:
         tickers = get_bybit_data()
         current_time = time.time()
+        
+        if not tickers:
+            print("⚠️ Не удалось получить тикеры от Bybit. Повтор через 10 сек...")
+            time.sleep(10)
+            continue
+            
+        print(f"📊 Проверяю рынок... Получено {len(tickers)} пар от Bybit.")
         
         for ticker in tickers:
             symbol = ticker["symbol"]
@@ -61,15 +69,12 @@ def main_scanner_loop():
             if symbol not in prices_history:
                 prices_history[symbol] = []
             
-            # Добавляем текущую цену с меткой времени
             prices_history[symbol].append((current_time, current_price))
             
-            # Очищаем старые данные (старше 5 минут)
+            # Храним историю за последние 5 минут (300 секунд)
             prices_history[symbol] = [p for p in prices_history[symbol] if current_time - p[0] <= 300]
             
-            # Нам нужна самая старая цена за эти 5 минут для сравнения
             old_price = prices_history[symbol][0][1]
-            
             if old_price == 0:
                 continue
                 
@@ -91,7 +96,7 @@ def main_scanner_loop():
                         msg = (
                             f"🟢 *ИМПУЛЬС ВВЕРХ* 📈\n\n"
                             f"🔹 *Монета:* #{clean_symbol} (BingX)\n"
-                            f"📊 *Изменение за 5м:* +{price_change:.2f}%\n"
+                            f"📊 *Изменение:* +{price_change:.2f}%\n"
                             f"💰 *Цена:* {current_price}\n"
                             f"💵 *Объем 24h:* {volume_24h:.2f}M USDT\n\n"
                             f"🔗 [Открыть график {clean_symbol} на Coinglass]({coinglass_url})"
@@ -100,7 +105,7 @@ def main_scanner_loop():
                         msg = (
                             f"🔴 *ИМПУЛЬС ВНИЗ* 📉\n\n"
                             f"🔹 *Монета:* #{clean_symbol} (BingX)\n"
-                            f"📊 *Изменение за 5м:* {price_change:.2f}%\n"
+                            f"📊 *Изменение:* {price_change:.2f}%\n"
                             f"💰 *Цена:* {current_price}\n"
                             f"💵 *Объем 24h:* {volume_24h:.2f}M USDT\n\n"
                             f"🔗 [Открыть график {clean_symbol} на Coinglass]({coinglass_url})"
@@ -108,12 +113,14 @@ def main_scanner_loop():
                     
                     LAST_SIGNAL_TIMES[symbol] = current_time
                     send_telegram_message(msg)
+                    print(f"✅ Сигнал отправлен в TG по монете {clean_symbol}")
                     
         time.sleep(10)
 
-# ЗАПУСК
+# ЗАПУСК ПОТОКА
 threading.Thread(target=main_scanner_loop, daemon=True).start()
 
+# ВЕБ-ЗАГЛУШКА ДЛЯ RENDER
 import http.server
 import socketserver
 
@@ -124,6 +131,8 @@ class QuietHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(b"OK")
     def log_message(self, format, *args):
         return
+
+send_telegram_message("🤖 Бот заступил на дежурство. Логирование запущено.")
 
 with socketserver.TCPServer(("0.0.0.0", 10000), QuietHandler) as httpd:
     httpd.serve_forever()
