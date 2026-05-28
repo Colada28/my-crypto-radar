@@ -7,7 +7,7 @@ import http.server
 import threading
 
 # ==========================================
-# --- БЛОК 1: НАСТРОЙКИ (МАКСИМАЛЬНАЯ ЧУВСТВИТЕЛЬНОСТЬ) ---
+# --- БЛОК 1: НАСТРОЙКИ ---
 # ==========================================
 
 TELEGRAM_TOKEN = "7294451636:AAH0vH2ayzopTG2atZEezEa5PWkvKMV_Sxs" 
@@ -17,9 +17,9 @@ BINGX_URL = "https://open-api.bingx.com/openApi/swap/v2/quote/ticker"
 BYBIT_URL = "https://api.bybit.com"
 
 # --- ФИЛЬТРЫ ПОД ТВОЮ СТРАТЕГИЮ (СТОП 2% / ТЕЙК 3-4%) ---
-MIN_VOLUME_24H = 3000000       # Снизили до $3M, чтобы ловить утренние пампы
-THRESHOLD_PERCENT = 2.2        # Триггер от 2.2% (успеешь зайти в начале импульса)
-MIN_LIQ_AMOUNT = 3000          # Крупные ликвидации Bybit от $3,000
+MIN_VOLUME_24H = 3000000       # От $3M (чтобы ловить утренние движения)
+THRESHOLD_PERCENT = 2.2        # Импульс от 2.2% за 5 минут (идеально для входа)
+MIN_LIQ_AMOUNT = 3000          # Ликвидации Bybit от $3,000
 
 CHECK_INTERVAL_SECONDS = 60    # Проверка каждую минуту
 
@@ -28,7 +28,7 @@ CHECK_INTERVAL_SECONDS = 60    # Проверка каждую минуту
 # ==========================================
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
-price_history = {}  # Хранилище цен: {symbol: [список_цен_за_5_минут]}
+price_history = {}  # Хранилище: {symbol: [список_цен]}
 last_alerts = {}
 
 def start_simple_http_server():
@@ -95,7 +95,7 @@ def send_pump_alert(symbol, change, price, volume):
     message = (
         f"{emoji}\n\n"
         f"🔹 **Монета:** #{clean_symbol} (BingX)\n"
-        f"📊 **Движение (до 5 мин):** {change:+.2f}%\n"
+        f"📊 **Движение за 5 мин:** {change:+.2f}%\n"
         f"💰 **Цена:** {price:.8f}".rstrip('0').rstrip('.') + "\n"
         f"💰 **Объем 24h:** {formatted_vol}\n\n"
         f"🔗 [График {clean_symbol} на Coinglass]({dynamic_link})"
@@ -123,16 +123,8 @@ def send_liq_alert(symbol, side, amount_usd, price):
         print(f"Ошибка ТГ ликвидаций: {e}", flush=True)
 
 if __name__ == "__main__":
-    print("=== Единый Скринер (Пампы с памятью + Ликвидации) запущен ===", flush=True)
+    print("=== Единый Скринер (Пампы FIXED + Ликвидации) запущен ===", flush=True)
     
-    # Первичная инициализация базы цен
-    tickers = get_bingx_tickers()
-    if tickers:
-        for item in tickers:
-            symbol = item["symbol"]
-            if symbol.endswith("-USDT"):
-                price_history[symbol] = [float(item["lastPrice"])]
-                
     while True:
         try:
             # 1. Анализ Пампов BingX
@@ -147,25 +139,27 @@ if __name__ == "__main__":
                         
                     new_price = float(item["lastPrice"])
                     
-                    if symbol in price_history and len(price_history[symbol]) > 0:
-                        # Сравниваем текущую цену с САМОЙ СТАРОЙ ценой в истории (5 минут назад)
-                        old_price = price_history[symbol][0]
+                    if symbol not in price_history:
+                        price_history[symbol] = []
+                    
+                    # Добавляем текущую цену в историю
+                    price_history[symbol].append(new_price)
+                    
+                    # Если накопилось хотя бы 5 минут истории, делаем расчет
+                    if len(price_history[symbol]) >= 5:
+                        old_price = price_history[symbol][0] # Цена ровно 5 минут назад
                         if old_price > 0:
                             price_change = ((new_price - old_price) / old_price) * 100
                             
                             if abs(price_change) >= THRESHOLD_PERCENT:
                                 current_time = time.time()
+                                # Анти-спам фильтр на 5 минут для одной монеты
                                 if symbol not in last_alerts or current_time - last_alerts[symbol] > 300:
                                     send_pump_alert(symbol, price_change, new_price, volume)
                                     last_alerts[symbol] = current_time
-                                    
-                        # Добавляем новую цену в историю
-                        price_history[symbol].append(new_price)
-                        # Храним только последние 5 замеров (5 минут)
-                        if len(price_history[symbol]) > 5:
-                            price_history[symbol].pop(0)
-                    else:
-                        price_history[symbol] = [new_price]
+                        
+                        # Удаляем самый старый элемент, чтобы длина всегда была ровно 5 замеров
+                        price_history[symbol].pop(0)
             
             # 2. Анализ Ликвидаций Bybit
             check_bybit_liquidations()
