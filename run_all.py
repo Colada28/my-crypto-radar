@@ -10,22 +10,22 @@ import threading
 # --- БЛОК 1: НАСТРОЙКИ ---
 # ==========================================
 
-# Скрипт сначала ищет токен в настройках Render. 
-# Если не находит, берет жестко прописанный правильный токен.
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8268691280:AAGhrZbF4okL7YxO8qm1sTXZI7azyQGA4zM")
+# Твой старый рабочий токен памп-бота
+TELEGRAM_TOKEN = "8834450636:AAEC-FohGV3UixvjoFWzYUhi4RWZsd6ZZsg" 
 CHAT_ID = "-1003714825454" 
 
 BINGX_URL = "https://open-api.bingx.com/openApi/swap/v2/quote/ticker"
 BYBIT_URL = "https://api.bybit.com"
 
-MIN_VOLUME_24H = 1500000       
-THRESHOLD_PERCENT = 1.5        
-MIN_LIQ_AMOUNT = 1500          
+# Настройки фильтров
+MIN_VOLUME_24H = 1500000       # Суточный объем от $1.5M
+THRESHOLD_PERCENT = 1.5        # Памп/дамп от 1.5% за 15 минут
+MIN_LIQ_AMOUNT = 1500          # Ликвидации Bybit от $1500
 
 CHECK_INTERVAL_SECONDS = 60    
 
 # ==========================================
-# --- БЛОК 2: ЗАПУСК ВЕБ-СЕРВЕРА ДЛЯ RENDER ---
+# --- БЛОК 2: ВЕБ-СЕРВЕРА ДЛЯ RENDER ---
 # ==========================================
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
@@ -46,7 +46,7 @@ def start_simple_http_server():
 threading.Thread(target=start_simple_http_server, daemon=True).start()
 
 # ==========================================
-# --- БЛОК 3: ЛОГИКА СКРИНЕРОВ ---
+# --- БЛОК 3: ЛОГИКА СТАРЫХ ПАМПОВ И ЛИКВИДАЦИЙ ---
 # ==========================================
 
 def get_bingx_tickers():
@@ -90,6 +90,7 @@ def check_bybit_liquidations():
 def send_pump_alert(symbol, change, price, volume):
     emoji = "🟢 ИМПУЛЬС ВВЕРХ 📈" if change > 0 else "🔴 ИМПУЛЬС ВНИЗ 📉"
     formatted_vol = f"${volume/1_000_000:.2f}M"
+    
     clean_symbol = symbol.replace("USDT", "").replace("-USDT", "")
     dynamic_link = f"https://www.coinglass.com/tv/BingX_{clean_symbol}USDT"
     
@@ -104,7 +105,7 @@ def send_pump_alert(symbol, change, price, volume):
     try:
         bot.send_message(CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
     except Exception as e: 
-        print(f"Ошибка отправки в ТГ: {e}", flush=True)
+        print(f"Ошибка отправки пампа: {e}", flush=True)
 
 def send_liq_alert(symbol, side, amount_usd, price):
     emoji = "🩸 ЛОНГ ЛИКВИДАЦИЯ 🩸" if side.lower() == "sell" else "🔥 ШОРТ ЛИКВИДАЦИЯ 🔥"
@@ -121,16 +122,10 @@ def send_liq_alert(symbol, side, amount_usd, price):
     try:
         bot.send_message(CHAT_ID, message, parse_mode="Markdown", disable_web_page_preview=True)
     except Exception as e: 
-        print(f"Ошибка ТГ ликвидаций: {e}", flush=True)
+        print(f"Ошибка отправки ликвидации: {e}", flush=True)
 
 if __name__ == "__main__":
-    print("=== Единый Скринер запущен с проверкой токена ===", flush=True)
-    
-    try:
-        bot.send_message(CHAT_ID, "🚀 **Скринер успешно запущен и подключен к каналу!**\nНачинаю сбор истории цен (15 минут)...", parse_mode="Markdown")
-        print("Тестовое сообщение успешно отправлено в Telegram.", flush=True)
-    except Exception as e:
-        print(f"Критическая ошибка проверки Telegram при старте: {e}", flush=True)
+    print("=== Скринер перезапущен с ликвидациями и старым токеном ===", flush=True)
     
     while True:
         try:
@@ -166,6 +161,6 @@ if __name__ == "__main__":
             check_bybit_liquidations()
             
         except Exception as e:
-            print(f"Критическая ошибка в основном цикле: {e}", flush=True)
+            print(f"Ошибка в основном цикле: {e}", flush=True)
             
         time.sleep(CHECK_INTERVAL_SECONDS)
