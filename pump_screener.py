@@ -12,10 +12,10 @@ API_SECRET = ""
 TELEGRAM_TOKEN = "8941415221:AAEUVXO8QacNeWRNVcH_UmfW2GuVOBHW0cg"
 CHAT_ID = "@alexey_pump_alerts_new"
 
-# Твои актуальные фильтры
-LONG_TRIGGER = 2.0       # Памп от +2.0%
-SHORT_TRIGGER = 3.0      # Дамп от -3.0%
-MIN_VOLUME_M = 1.0       # Объем строго больше 1 млн USDT
+# Твои оригинальные старые настройки
+LONG_TRIGGER = 2.5       # Изменение цены для Лонга (%)
+SHORT_TRIGGER = 4.0      # Изменение цены для Шорта (%)
+MIN_VOLUME_M = 0.5       # Минимальный объем в млн USDT (0.50M)
 
 # Переменные для веб-страницы статуса
 START_TIME = time.time()
