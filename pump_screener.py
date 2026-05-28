@@ -2,21 +2,23 @@ import time
 import requests
 from pybit.unified_trading import HTTP
 
-# ==========================================
-# НАСТРОЙКИ БОТА (Твои старые параметры)
-# ==========================================
-TOKEN = "7292215286:AAEvW_Jz..." # Твой токен бота (оставь свой из старого файла)
-CHAT_ID = "@alexey_pump_alerts_new" # Твой канал
+# ==============================================================================
+# НАСТРОЙКИ БОТА (Вставь свой токен ниже)
+# ==============================================================================
+TOKEN = "7292215286:AAEvW_Jz..."  # <-- ВСТАВЬ СЮДА СВОЙ ТОКЕН ВНУТРЬ КАВЫЧЕК
+CHAT_ID = "@alexey_pump_alerts_new"
 
-LONG_TRIGGER = 2.5       # Памп от +2.5%
-SHORT_TRIGGER = 4.0      # Дамп от -4.0%
-MIN_VOLUME_M = 2.0       # Подняли до 2M$, чтобы отсечь спам и мелкий мусор
+# ЖЕСТКИЕ ФИЛЬТРЫ ОТ СПАМА
+LONG_TRIGGER = 5.0       # Ловим сильный Памп только от +5.0%
+SHORT_TRIGGER = 5.0      # Ловим сильный Дамп только от -5.0%
+MIN_VOLUME_M = 2.0       # Объем торгов за 24 часа строго от 2 млн USDT
 
-# Защита от спама: монета не побеспокоит чаще раза в 15 минут
+# Защита от повторных сигналов (монета засыпает на 30 минут)
 LAST_SIGNAL_TIMES = {}
-SIGNAL_COOLDOWN = 900    # 15 минут в секундах
+SIGNAL_COOLDOWN = 1800   # 30 минут в секундах
+# ==============================================================================
 
-# Инициализация Bybit (Сервер во Франкфурте, без прокси)
+# Подключение к API (Сервер работает во Франкфурте)
 session = HTTP(testnet=False)
 
 def send_telegram_message(text):
@@ -25,31 +27,29 @@ def send_telegram_message(text):
         "chat_id": CHAT_ID,
         "text": text,
         "parse_mode": "Markdown",
-        "disable_web_page_preview": True
+        "disable_web_page_preview": False  # Разрешаем красивый предпросмотр графика
     }
     try:
         res = requests.post(url, json=payload)
         if res.status_code != 200:
             print(f"Ошибка Telegram API: {res.status_code} {res.text}")
     except Exception as e:
-        print(f"Ошибка отправки в TG: {e}")
+        print(f"Ошибка отправки сообщения: {e}")
 
 def get_bybit_data():
     try:
-        # Берем данные с линейных фьючерсов (USDT)
         response = session.get_tickers(category="linear")
         if response and response.get("retCode") == 0:
             return response["result"]["list"]
     except Exception as e:
-        print(f"Ошибка получения данных с Bybit: {e}")
+        print(f"Ошибка получения тикеров: {e}")
     return []
 
-# Хранилище цен для вычисления импульсов
 prices_history = {}
 
 print("🤖 Мониторинг статуса запущен на порту 10000")
-send_telegram_message("🚀 Бот-радар успешно запущен и встал на дежурство по старым настройкам!")
-print("🚀 Сканирование Bybit началось...")
+send_telegram_message("🚀 Бот-радар обновлен! Фильтры зажаты: Импульсы от 5%, перезарядка монеты 30 минут. Графики настроены на BingX.")
+print("🚀 Сканирование рынка началось...")
 
 while True:
     tickers = get_bybit_data()
@@ -58,12 +58,11 @@ while True:
     for ticker in tickers:
         symbol = ticker["symbol"]
         
-        # Работаем только с парами к USDT
+        # Анализируем фьючерсные контракты к USDT
         if not symbol.endswith("USDT"):
             continue
             
         current_price = float(ticker["lastPrice"])
-        # Объем за 24 часа в миллионах долларов
         volume_24h = float(ticker["turnover24h"]) / 1_000_000 
         
         if symbol not in prices_history:
@@ -74,53 +73,49 @@ while True:
         if old_price == 0:
             continue
             
-        # Считаем изменение цены в процентах
         price_change = ((current_price - old_price) / old_price) * 100
         
-        # Проверяем базовые фильтры: объём торгов
+        # 1. Проверяем фильтр по объему торгов
         if volume_24h >= MIN_VOLUME_M:
             
-            # Проверяем условия на Памп или Дамп
+            # 2. Проверяем новые жесткие условия на Памп или Дамп (от 5%)
             is_long = price_change >= LONG_TRIGGER
             is_short = price_change <= -SHORT_TRIGGER
             
             if is_long or is_short:
-                # Жесткая защита от спама: проверяем таймаут монеты
+                # 3. Проверяем защиту от спама (не чаще чем раз в 30 минут)
                 if symbol in LAST_SIGNAL_TIMES:
                     if current_time - LAST_SIGNAL_TIMES[symbol] < SIGNAL_COOLDOWN:
-                        continue # Пропускаем, монета еще "остывает"
+                        continue
                 
-                # Формируем чистый тикер для ссылки (например: ZBCN)
                 clean_symbol = symbol.replace("USDT", "")
                 
-                # ИСПРАВЛЕННАЯ ССЫЛКА на деривативный график Coinglass
-                coinglass_url = f"https://www.coinglass.com/tv/Bybit_{clean_symbol}USDT"
+                # Точная рабочая ссылка на интерфейс Coinglass TV для биржи BingX
+                coinglass_url = f"https://www.coinglass.com/tv/BingX_{clean_symbol}USDT"
                 
                 if is_long:
                     msg = (
                         f"🟢 *ИМПУЛЬС ВВЕРХ* 📈\n\n"
-                        f"🔹 *Монета:* #{clean_symbol} (Bybit)\n"
+                        f"🔹 *Монета:* #{clean_symbol} (BingX)\n"
                         f"📊 *Изменение:* +{price_change:.2f}%\n"
                         f"💰 *Цена:* {current_price}\n"
                         f"💵 *Объем 24h:* {volume_24h:.2f}M USDT\n\n"
-                        f"🔗 [График {clean_symbol} на Coinglass]({coinglass_url})"
+                        f"🔗 [Открыть график {clean_symbol} на Coinglass TV]({coinglass_url})"
                     )
                 else:
                     msg = (
                         f"🔴 *ИМПУЛЬС ВНИЗ* 📉\n\n"
-                        f"🔹 *Монета:* #{clean_symbol} (Bybit)\n"
+                        f"🔹 *Монета:* #{clean_symbol} (BingX)\n"
                         f"📊 *Изменение:* {price_change:.2f}%\n"
                         f"💰 *Цена:* {current_price}\n"
                         f"💵 *Объем 24h:* {volume_24h:.2f}M USDT\n\n"
-                        f"🔗 [График {clean_symbol} на Coinglass]({coinglass_url})"
+                        f"🔗 [Открыть график {clean_symbol} на Coinglass TV]({coinglass_url})"
                     )
                 
-                # Фиксируем время отправки и пушим в канал
+                # Фиксируем время сигнала и отправляем в Telegram
                 LAST_SIGNAL_TIMES[symbol] = current_time
                 send_telegram_message(msg)
                 
-        # Обновляем цену для следующего круга проверок
         prices_history[symbol] = current_price
         
-    # Пауза между циклами сканирования стакана
     time.sleep(10)
