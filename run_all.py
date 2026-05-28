@@ -10,17 +10,15 @@ import threading
 # --- БЛОК 1: НАСТРОЙКИ ---
 # ==========================================
 
-# Твой старый рабочий токен памп-бота
 TELEGRAM_TOKEN = "8834450636:AAEC-FohGV3UixvjoFWzYUhi4RWZsd6ZZsg" 
 CHAT_ID = "-1003714825454" 
 
 BINGX_URL = "https://open-api.bingx.com/openApi/swap/v2/quote/ticker"
 BYBIT_URL = "https://api.bybit.com"
 
-# Настройки фильтров
-MIN_VOLUME_24H = 1500000       # Суточный объем от $1.5M
-THRESHOLD_PERCENT = 1.5        # Памп/дамп от 1.5% за 15 минут
-MIN_LIQ_AMOUNT = 1500          # Ликвидации Bybit от $1500
+MIN_VOLUME_24H = 1500000       
+THRESHOLD_PERCENT = 1.5        
+MIN_LIQ_AMOUNT = 1500          
 
 CHECK_INTERVAL_SECONDS = 60    
 
@@ -90,7 +88,6 @@ def check_bybit_liquidations():
 def send_pump_alert(symbol, change, price, volume):
     emoji = "🟢 ИМПУЛЬС ВВЕРХ 📈" if change > 0 else "🔴 ИМПУЛЬС ВНИЗ 📉"
     formatted_vol = f"${volume/1_000_000:.2f}M"
-    
     clean_symbol = symbol.replace("USDT", "").replace("-USDT", "")
     dynamic_link = f"https://www.coinglass.com/tv/BingX_{clean_symbol}USDT"
     
@@ -127,6 +124,16 @@ def send_liq_alert(symbol, side, amount_usd, price):
 if __name__ == "__main__":
     print("=== Скринер перезапущен с ликвидациями и старым токеном ===", flush=True)
     
+    # ----------------------------------------------------
+    # ТЕСТОВОЙ СИГНАЛ ПРИ СТАРТЕ ДЛЯ ПРОВЕРКИ СВЯЗИ С КАНАЛОМ
+    # ----------------------------------------------------
+    try:
+        bot.send_message(CHAT_ID, "🚀 **Проверка связи!** Бот успешно запустился на Render и подключился к этому каналу. Ожидаю импульсы на рынке...", parse_mode="Markdown")
+        print("Тестовое сообщение успешно ушло в ТГ!", flush=True)
+    except Exception as e:
+        print(f"ВНИМАНИЕ: Не удалось отправить тест в канал. Ошибка: {e}", flush=True)
+    # ----------------------------------------------------
+
     while True:
         try:
             tickers = get_bingx_tickers()
