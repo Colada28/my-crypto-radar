@@ -32,7 +32,8 @@ price_history = {}  # Хранилище: {symbol: [список_цен]}
 last_alerts = {}
 
 def start_simple_http_server():
-    port = int(os.environ.get('PORT', 8080))
+    # Жестко ставим 10000 по умолчанию, чтобы у Render не было конфликтов с портами
+    port = int(os.environ.get('PORT', 10000))
     server_address = ('', port)
     class SimpleHandler(http.server.SimpleHTTPRequestHandler):
         def do_GET(self):
