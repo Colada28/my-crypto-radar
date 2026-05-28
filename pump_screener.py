@@ -6,13 +6,13 @@ import socketserver
 from pybit.unified_trading import HTTP
 
 # ==============================================================================
-# НАСТРОЙКИ БОТА (Максимально чувствительные для теста)
+# НАСТРОЙКИ БОТА (Тестовые чувствительные)
 # ==============================================================================
 TOKEN = "8941415221:AAEUvX08QacNeWRNVcH_UmfW2GuVOBHW0cg"
 CHAT_ID = "@alexey_pump_alerts_new"
 
-LONG_TRIGGER = 1.0       # Импульс от +1.0%
-SHORT_TRIGGER = 1.0      # Импульс от -1.0%
+LONG_TRIGGER = 1.0       # Памп от +1.0% за 5 минут
+SHORT_TRIGGER = 1.0      # Дамп от -1.0% за 5 минут
 MIN_VOLUME_M = 0.1       # Объем от 100к USDT
 
 LAST_SIGNAL_TIMES = {}
@@ -44,12 +44,12 @@ def get_bybit_data():
     return []
 
 def main_scanner_loop():
-    # Даем серверу 10 секунд спокойно запуститься и пройти проверки Render
-    time.sleep(10)
+    # Даем веб-серверу 15 секунд на прохождение всех проверок Render
+    time.sleep(15)
     
     prices_history = {}
-    print("🚀 Сканер рынка успешно запущен в фоновом режиме!")
-    send_telegram_message("🤖 Бот-радар успешно запущен и начал сбор данных!")
+    print("🚀 Сканер рынка запущен. Начинаю накопление 5-минутной истории...")
+    send_telegram_message("🤖 Бот-радар успешно зафиксирован на сервере. Сбор данных начался!")
     
     while True:
         tickers = get_bybit_data()
@@ -65,12 +65,17 @@ def main_scanner_loop():
                 volume_24h = float(ticker["turnover24h"]) / 1_000_000 
                 
                 if symbol not in prices_history:
-                    prices_history[symbol] = current_price
-                    continue
+                    prices_history[symbol] = []
                 
-                old_price = prices_history[symbol]
+                # Добавляем цену с меткой времени
+                prices_history[symbol].append((current_time, current_price))
+                
+                # Удаляем данные старше 5 минут (300 секунд)
+                prices_history[symbol] = [p for p in prices_history[symbol] if current_time - p[0] <= 300]
+                
+                # Берем самую старую цену за 5 минут для вычисления процента
+                old_price = prices_history[symbol][0][1]
                 if old_price == 0:
-                    prices_history[symbol] = current_price
                     continue
                     
                 price_change = ((current_price - old_price) / old_price) * 100
@@ -91,7 +96,7 @@ def main_scanner_loop():
                             msg = (
                                 f"🟢 *ИМПУЛЬС ВВЕРХ* 📈\n\n"
                                 f"🔹 *Монета:* #{clean_symbol} (BingX)\n"
-                                f"📊 *Изменение:* +{price_change:.2f}%\n"
+                                f"📊 *Изменение за 5м:* +{price_change:.2f}%\n"
                                 f"💰 *Цена:* {current_price}\n"
                                 f"💵 *Объем 24h:* {volume_24h:.2f}M USDT\n\n"
                                 f"🔗 [Открыть график {clean_symbol} на Coinglass]({coinglass_url})"
@@ -100,7 +105,7 @@ def main_scanner_loop():
                             msg = (
                                 f"🔴 *ИМПУЛЬС ВНИЗ* 📉\n\n"
                                 f"🔹 *Монета:* #{clean_symbol} (BingX)\n"
-                                f"📊 *Изменение:* {price_change:.2f}%\n"
+                                f"📊 *Изменение за 5м:* {price_change:.2f}%\n"
                                 f"💰 *Цена:* {current_price}\n"
                                 f"💵 *Объем 24h:* {volume_24h:.2f}M USDT\n\n"
                                 f"🔗 [Открыть график {clean_symbol} на Coinglass]({coinglass_url})"
@@ -109,33 +114,24 @@ def main_scanner_loop():
                         LAST_SIGNAL_TIMES[symbol] = current_time
                         send_telegram_message(msg)
                         print(f"✅ Сигнал по {clean_symbol} отправлен!")
-                
-                # Запоминаем текущую цену как базовую для следующего шага
-                prices_history[symbol] = current_price
-                
+                        
         time.sleep(15)
 
-# === ВЕБ-СЕРВЕР ДЛЯ ОБХОДА БЛОКИРОВКИ RENDER ===
 class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
         self.wfile.write(b"OK")
-        
     def log_message(self, format, *args):
-        return # Отключаем спам логов в консоль
+        return 
 
 def run_web_server():
-    # Запуск стандартного сервера на порту 10000
     with socketserver.TCPServer(("0.0.0.0", 10000), HealthCheckHandler) as httpd:
-        print("🖥️ Веб-сервер проверки портов запущен на порту 10000")
         httpd.serve_forever()
 
 if __name__ == "__main__":
-    # 1. Сначала запускаем веб-сервер в отдельном потоке, чтобы Render СРАЗУ увидел порт
-    web_thread = threading.Thread(target=run_web_server, daemon=True)
-    web_thread.start()
-    
-    # 2. В основном потоке запускаем бесконечный сканер рынка
+    # Запускаем веб-сервер для удержания деплоя в отдельном потоке
+    threading.Thread(target=run_web_server, daemon=True).start()
+    # Запускаем основной цикл сканирования
     main_scanner_loop()
