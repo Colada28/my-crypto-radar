@@ -1,58 +1,83 @@
-import requests
+import os
 import time
+import asyncio
+import json
+import urllib.request
+import urllib.error
+from fastapi import FastAPI
 
-# Твой новый рабочий токен и канал
+# Твой рабочий токен из BotFather
 TOKEN = "8941415221:AAHX-1F901LYEatcMEBqJFdTE7QpGbp4t88"
-CHAT_ID = "@alexey_pump_alerts_new"
 
-LONG_TRIGGER = 0.001       
-SHORT_TRIGGER = -0.001   
+# Точный цифровой ID твоего канала из IDBot
+CHAT_ID = -1003959408476
+
+LONG_TRIGGER = 1.0       
+SHORT_TRIGGER = -1.0     
 MIN_VOLUME_M = 0.1       
 
 LAST_SIGNAL_TIMES = {}
 SIGNAL_COOLDOWN = 300    
 
+app = FastAPI()
+
 def send_telegram_message(text):
     if not TOKEN:
+        print("[КРИТИЧЕСКАЯ ОШИБКА]: Переменная TOKEN пустая!")
         return
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": text,
-        "parse_mode": "Markdown",
-        "disable_web_page_preview": True
-    }
+        
     try:
-        response = requests.post(url, json=payload, timeout=5)
-        if response.status_code == 200:
-            print("[ТГ ЛОГ] Сообщение успешно отправлено!")
-        else:
-            print(f"[ТГ ОШИБКА]: Код {response.status_code}, Ответ: {response.text}")
+        url = f"https://api.telegram.org/bot{TOKEN.strip()}/sendMessage"
+        
+        payload_data = {
+            "chat_id": CHAT_ID,
+            "text": text,
+            "parse_mode": "Markdown",
+            "disable_web_page_preview": True
+        }
+        
+        payload = json.dumps(payload_data, ensure_ascii=False).encode("utf-8")
+        
+        req = urllib.request.Request(
+            url, 
+            data=payload, 
+            headers={
+                "Content-Type": "application/json; charset=utf-8",
+                "User-Agent": "Mozilla/5.0"
+            },
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            status = response.getcode()
+            print(f"[ТГ ЛОГ] Сообщение успешно отправлено! Статус: {status}")
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode("utf-8")
+        print(f"[ТГ ОШИБКА ОТ СЕРВЕРА TELEGRAM]: Код {e.code}, Ответ: {error_body}")
     except Exception as e:
         print(f"[ТГ СИСТЕМНАЯ ОШИБКА]: {e}")
 
 def get_bybit_tickers():
-    url = "https://api.bybit.com/v5/market/tickers?category=linear"
     try:
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
+        url = "https://api.bybit.com/v5/market/tickers?category=linear"
+        with urllib.request.urlopen(url, timeout=5) as response:
+            data = json.loads(response.read().decode("utf-8"))
             if data.get("retCode") == 0:
                 return data["result"]["list"]
     except Exception as e:
         print(f"[BYBIT ОШИБКА]: {e}")
     return []
 
-def main():
+async def main_scanner_loop():
     print("🚀 [СИСТЕМА] Фоновый движок сканера Bybit запущен успешно!")
-    time.sleep(5)
+    await asyncio.sleep(5)
     
-    send_telegram_message("🤖 *Бот-радар успешно запущен на Render по старому коду!*")
+    send_telegram_message("🤖 *Бот-радар успешно запущен напрямую через FastAPI на Render!*")
     
     prices_history = {}
     
     while True:
-        tickers = get_bybit_tickers()
+        loop = asyncio.get_event_loop()
+        tickers = await loop.run_in_executor(None, get_bybit_tickers)
         current_time = time.time()
         
         if tickers:
@@ -108,10 +133,15 @@ def main():
                             )
                         
                         LAST_SIGNAL_TIMES[symbol] = current_time
-                        send_telegram_message(msg)
+                        await loop.run_in_executor(None, send_telegram_message, msg)
                         print(f"[СИГНАЛ] Отправлено оповещение по {clean_symbol}")
                         
-        time.sleep(15)
+        await asyncio.sleep(15)
 
-if __name__ == "__main__":
-    main()
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(main_scanner_loop())
+
+@app.get("/")
+async def read_root():
+    return {"status": "working"}
