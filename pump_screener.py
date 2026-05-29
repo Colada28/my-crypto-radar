@@ -6,10 +6,7 @@ import urllib.request
 import urllib.error
 from fastapi import FastAPI
 
-# Свежий и чистый токен из BotFather (без пробелов)
 TOKEN = "8941415221:AAHX-1F901LYEatcMEBqJFdTE7QpGbp4t88"
-
-# Точный цифровой ID твоего канала
 CHAT_ID = -1003959408476
 
 LONG_TRIGGER = 1.0       
@@ -22,36 +19,26 @@ SIGNAL_COOLDOWN = 300
 app = FastAPI()
 
 def send_telegram_message(text):
-    # Дополнительная очистка токена внутри кода на случай скрытых переносов строк
     clean_token = str(TOKEN).strip().replace(" ", "")
-    
     try:
         url = f"https://api.telegram.org/bot{clean_token}/sendMessage"
-        
         payload_data = {
             "chat_id": CHAT_ID,
             "text": text,
             "parse_mode": "Markdown",
             "disable_web_page_preview": True
         }
-        
         payload = json.dumps(payload_data, ensure_ascii=False).encode("utf-8")
-        
         req = urllib.request.Request(
             url, 
             data=payload, 
-            headers={
-                "Content-Type": "application/json; charset=utf-8",
-                "User-Agent": "Mozilla/5.0"
-            },
+            headers={"Content-Type": "application/json; charset=utf-8", "User-Agent": "Mozilla/5.0"},
             method="POST"
         )
         with urllib.request.urlopen(req, timeout=5) as response:
-            status = response.getcode()
-            print(f"[ТГ ЛОГ] Сообщение успешно отправлено! Статус: {status}")
+            print(f"[ТГ ЛОГ] Сообщение успешно отправлено! Статус: {response.getcode()}")
     except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8")
-        print(f"[ТГ ОШИБКА ОТ СЕРВЕРА TELEGRAM]: Код {e.code}, Ответ: {error_body}")
+        print(f"[ТГ ОШИБКА]: Код {e.code}, Ответ: {e.read().decode('utf-8')}")
     except Exception as e:
         print(f"[ТГ СИСТЕМНАЯ ОШИБКА]: {e}")
 
@@ -67,13 +54,12 @@ def get_bybit_tickers():
     return []
 
 async def main_scanner_loop():
-    print("🚀 [СИСТЕМА] Фоновый движок сканера Bybit запущен успешно!")
+    print("🚀 [СИСТЕМА] Сканер Bybit запущен напрямую через Uvicorn!")
     await asyncio.sleep(5)
     
     send_telegram_message("🤖 *Бот-радар успешно запущен напрямую через FastAPI на Render!*")
     
     prices_history = {}
-    
     while True:
         loop = asyncio.get_event_loop()
         tickers = await loop.run_in_executor(None, get_bybit_tickers)
