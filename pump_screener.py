@@ -5,8 +5,8 @@ import time
 TOKEN = "8941415221:AAHX-1F901LYEatcMEBqJFdTE7QpGbp4t88"
 CHAT_ID = "@alexey_pump_alerts_new"
 
-LONG_TRIGGER = 1.0       
-SHORT_TRIGGER = -1.0     
+LONG_TRIGGER = 0.001       
+SHORT_TRIGGER = -0.001   
 MIN_VOLUME_M = 0.1       
 
 LAST_SIGNAL_TIMES = {}
