@@ -1,30 +1,45 @@
-import os
 import time
 import requests
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
-# Твой токен и проверенный ID канала напрямую
+# Твой рабочий токен и ID канала напрямую
 TOKEN = "8941415221:AAHX-1F901LYEatcMEBqJFdTE7QpGbp4t88"
 CHAT_ID = "-1003959408476"
 
-# НАСТРОЙКИ ФИЛЬТРАЦИИ МУСОРА
-LONG_TRIGGER = 1.0       # Импульс вверх от 1%
-SHORT_TRIGGER = -1.0     # Импульс вниз от -1%
-MIN_VOLUME_M = 5.0       # Монеты с объемом торгов МЕНЬШЕ 5 млн $ бот будет игнорировать
+# Фильтрация мусора (Объем больше 5 млн USDT)
+LONG_TRIGGER = 1.0       
+SHORT_TRIGGER = -1.0     
+MIN_VOLUME_M = 5.0       
 
 LAST_SIGNAL_TIMES = {}
-SIGNAL_COOLDOWN = 300    # Защита от спама одной монетой (5 минут)
+SIGNAL_COOLDOWN = 300    
+
+# --- МИНИ-СЕРВЕР ДЛЯ RENDER ---
+class SimpleWebHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot is running")
+
+    def log_message(self, format, *args):
+        return  # Отключаем лишний спам в логах
+
+def run_web_server():
+    # Запускаем порт 10000, который требует Render
+    server = HTTPServer(("0.0.0.0", 10000), SimpleWebHandler)
+    print("🌍 Встроенный веб-сервер для Render запущен на порту 10000")
+    server.serve_forever()
+# ------------------------------
 
 def send_telegram_message(text):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        payload = {
-            "chat_id": CHAT_ID,
-            "text": text,
-            "parse_mode": "Markdown"
-        }
+        payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}
         r = requests.post(url, json=payload, timeout=5)
         if r.status_code == 200:
-            print(f"[ТГ ЛОГ] Аalert отправлен успешно!")
+            print("[ТГ ЛОГ] Алерт успешно отправлен в Telegram!")
         else:
             print(f"[ТГ ОШИБКА]: Код {r.status_code}, Ответ: {r.text}")
     except Exception as e:
@@ -42,10 +57,10 @@ def get_bybit_tickers():
     return []
 
 def main_scanner():
-    print("🚀 Сканер Bybit запущен в простом режиме...")
+    print("🚀 Сканер Bybit запущен. Фильтр мелких монет: от 5 млн USDT.")
     
-    # ДОБАВЬ ВОТ ЭТУ СТРОЧКУ ДЛЯ ПРОВЕРКИ:
-    send_telegram_message("🔥 Тест связи! Если ты видишь это сообщение, значит бот работает идеально и ждет импульсы!")
+    # Сразу шлем железный тест при старте!
+    send_telegram_message("🔥 *Бот успешно перезапущен!* Проверка связи прошла, режим сканирования активен.")
     
     prices_history = {}
     
@@ -62,7 +77,6 @@ def main_scanner():
                 current_price = float(ticker["lastPrice"])
                 volume_24h = float(ticker["turnover24h"]) / 1_000_000 
                 
-                # Фильтр мелких монет: если объем меньше 5 млн USDT — пропускаем ее
                 if volume_24h < MIN_VOLUME_M:
                     continue
                 
@@ -112,4 +126,9 @@ def main_scanner():
         time.sleep(15)
 
 if __name__ == "__main__":
+    # Запускаем веб-сервер для заглушки Render в отдельном потоке
+    web_thread = threading.Thread(target=run_web_server, daemon=True)
+    web_thread.start()
+    
+    # Запускаем основной сканер рынка
     main_scanner()
