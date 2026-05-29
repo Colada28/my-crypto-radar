@@ -26,12 +26,15 @@ def send_telegram_message(text):
         
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        payload = json.dumps({
+        
+        # Исправлено: принудительно кодируем словарь в JSON-строку, а затем в байты UTF-8
+        payload_data = {
             "chat_id": CHAT_ID,
             "text": text,
             "parse_mode": "Markdown",
             "disable_web_page_preview": True
-        }).encode("utf-8")
+        }
+        payload = json.dumps(payload_data).encode("utf-8")
         
         req = urllib.request.Request(
             url, 
@@ -63,7 +66,7 @@ async def main_scanner_loop():
     print("🚀 [СИСТЕМА] Фоновый движок сканера Bybit запущен успешно!")
     await asyncio.sleep(5)
     
-    send_telegram_message("🤖 *Бот-радар успешно запущен через Environment Variables на Render!*")
+    send_telegram_message("🤖 *Бот-радар успешно запущен и работает в штатном режиме на Render!*")
     
     prices_history = {}
     
