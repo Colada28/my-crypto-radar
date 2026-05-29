@@ -1,6 +1,8 @@
 import time
-import requests
 import asyncio
+import http.client
+import urllib.parse
+import json
 from fastapi import FastAPI
 
 # ТОКЕН СТРОГО ПО СКРИНШОТУ ИЗ BOTFATHER (С ЗАГЛАВНОЙ V)
@@ -17,38 +19,60 @@ SIGNAL_COOLDOWN = 300    # Кулдаун 5 минут на одну монет�
 
 app = FastAPI()
 
-def send_telegram_message(text):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": text,
-        "parse_mode": "Markdown",
-        "disable_web_page_preview": True
-    }
+# Чистый асинхронный отправщик без библиотеки requests
+async def send_telegram_message_async(text):
     try:
-        requests.post(url, json=payload, timeout=5)
-    except:
-        pass
+        url = f"/bot{TOKEN}/sendMessage"
+        payload = json.dumps({
+            "chat_id": CHAT_ID,
+            "text": text,
+            "parse_mode": "Markdown",
+            "disable_web_page_preview": True
+        })
+        headers = {"Content-Type": "application/json"}
+        
+        loop = asyncio.get_event_loop()
+        def do_request():
+            conn = http.client.HTTPSConnection("api.telegram.org", timeout=5)
+            conn.request("POST", url, body=payload, headers=headers)
+            res = conn.getresponse()
+            data = res.read()
+            conn.close()
+            return res.status, data
+            
+        status, _ = await loop.run_in_executor(None, do_request)
+        print(f"[ТГ ЛОГ] Отправка. Статус: {status}")
+    except Exception as e:
+        print(f"[ТГ ОШИБКА]: {e}")
 
-def get_bybit_tickers():
+# Чистый асинхронный заборщик данных с Bybit
+async def get_bybit_tickers_async():
     try:
-        url = "https://api.bybit.com/v5/market/tickers?category=linear"
-        res = requests.get(url, timeout=5).json()
-        if res.get("retCode") == 0:
-            return res["result"]["list"]
-    except:
-        pass
+        loop = asyncio.get_event_loop()
+        def do_request():
+            conn = http.client.HTTPSConnection("api.bybit.com", timeout=5)
+            conn.request("GET", "/v5/market/tickers?category=linear")
+            res = conn.getresponse()
+            data = res.read()
+            conn.close()
+            return json.loads(data.decode("utf-8"))
+            
+        result = await loop.run_in_executor(None, do_request)
+        if result.get("retCode") == 0:
+            return result["result"]["list"]
+    except Exception as e:
+        print(f"[BYBIT ОШИБКА]: {e}")
     return []
 
-# Настоящий асинхронный фоновый движок сканера
+# Настоящий неблокирующий фоновый движок сканера
 async def main_scanner_loop():
-    print("🚀 Сканер рынка Bybit успешно запущен в фоновом режиме!")
-    send_telegram_message("🤖 *Бот-радар успешно запущен на Render (FastAPI)!* Начинаю непрерывный мониторинг фьючерсов...")
+    print("🚀 [СИСТЕМА] Асинхронный движок радара запущен!")
+    await send_telegram_message_async("🤖 *Бот-радар успешно запущен на Render!* Начинаю непрерывный мониторинг фьючерсов Bybit.")
     
     prices_history = {}
     
     while True:
-        tickers = get_bybit_tickers()
+        tickers = await get_bybit_tickers_async()
         current_time = time.time()
         
         if tickers:
@@ -104,17 +128,16 @@ async def main_scanner_loop():
                             )
                         
                         LAST_SIGNAL_TIMES[symbol] = current_time
-                        send_telegram_message(msg)
-                        print(f" Сигнал отправлен по {clean_symbol}")
+                        await send_telegram_message_async(msg)
+                        print(f"[СИГНАЛ] Отправлено оповещение по {clean_symbol}")
                         
+        # Самое главное: асинхронная пауза, которая не вешает сервер
         await asyncio.sleep(15)
 
-# Стартовая точка для FastAPI, которая запускает задачу сканирования рынка
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(main_scanner_loop())
 
-# Главная страница для прохождения пингов Render
 @app.get("/")
-def read_root():
+async def read_root():
     return {"status": "working"}
