@@ -1,76 +1,68 @@
 import time
 import asyncio
-import http.client
-import urllib.parse
 import json
+import urllib.request
 from fastapi import FastAPI
 
-# ТОКЕН С АВТО-ОЧИСТКОЙ ОТ СКРЫТЫХ ПРОБЕЛОВ
-RAW_TOKEN = "8941415221:AAEUVX08QacNeWRNVcH_UmfW2GuVOBHW0cg"
-TOKEN = RAW_TOKEN.strip() # Удаляет любые невидимые пробелы по краям
+# ТОКЕН СТРОГО ИЗ СКРИНШОТА 1000112200.JPG
+TOKEN = "8941415221:AAEUVX08QacNeWRNVcH_UmfW2GuVOBHW0cg"
 CHAT_ID = "@alexey_pump_alerts_new"
 
-# РЕАЛЬНЫЕ РАБОЧИЕ НАСТРОЙКИ СКАНИРОВАНИЯ
+# НАСТРОЙКИ ФИЛЬТРАЦИИ И ТРИГГЕРОВ
 LONG_TRIGGER = 1.0       # Памп от +1.0% за 5 минут
 SHORT_TRIGGER = -1.0     # Дамп от -1.0% за 5 минут
-MIN_VOLUME_M = 0.1       # Объем торгов от 100 000 USDT за 24 часа
+MIN_VOLUME_M = 0.1       # Объем торгов от 100k USDT за 24 часа
 
 LAST_SIGNAL_TIMES = {}
-SIGNAL_COOLDOWN = 300    # Кулдаун 5 минут на одну монету
+SIGNAL_COOLDOWN = 300    
 
 app = FastAPI()
 
-async def send_telegram_message_async(text):
+def send_telegram_message(text):
     try:
-        url = f"/bot{TOKEN}/sendMessage"
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
         payload = json.dumps({
             "chat_id": CHAT_ID,
             "text": text,
             "parse_mode": "Markdown",
             "disable_web_page_preview": True
-        })
-        headers = {"Content-Type": "application/json"}
+        }).encode("utf-8")
         
-        loop = asyncio.get_event_loop()
-        def do_request():
-            conn = http.client.HTTPSConnection("api.telegram.org", timeout=5)
-            conn.request("POST", url, body=payload, headers=headers)
-            res = conn.getresponse()
-            data = res.read()
-            conn.close()
-            return res.status, data
-            
-        status, response_body = await loop.run_in_executor(None, do_request)
-        print(f"[ТГ ЛОГ] Отправка. Статус: {status}, Ответ: {response_body.decode('utf-8')}")
+        req = urllib.request.Request(
+            url, 
+            data=payload, 
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            status = response.getcode()
+            print(f"[ТГ ЛОГ] Сообщение отправлено. Статус: {status}")
     except Exception as e:
-        print(f"[ТГ ОШИБКА]: {e}")
+        print(f"[ТГ ОШИБКА ДЕФЕКТ]: {e}")
 
-async def get_bybit_tickers_async():
+def get_bybit_tickers():
     try:
-        loop = asyncio.get_event_loop()
-        def do_request():
-            conn = http.client.HTTPSConnection("api.bybit.com", timeout=5)
-            conn.request("GET", "/v5/market/tickers?category=linear")
-            res = conn.getresponse()
-            data = res.read()
-            conn.close()
-            return json.loads(data.decode("utf-8"))
-            
-        result = await loop.run_in_executor(None, do_request)
-        if result.get("retCode") == 0:
-            return result["result"]["list"]
+        url = "https://api.bybit.com/v5/market/tickers?category=linear"
+        with urllib.request.urlopen(url, timeout=5) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            if data.get("retCode") == 0:
+                return data["result"]["list"]
     except Exception as e:
         print(f"[BYBIT ОШИБКА]: {e}")
     return []
 
 async def main_scanner_loop():
     print("🚀 [СИСТЕМА] Асинхронный движок радара запущен!")
-    await send_telegram_message_async("🤖 *Бот-радар успешно запущен на Render!* Начинаю непрерывный мониторинг фьючерсов Bybit.")
+    
+    # Стартовый пинг для мгновенной проверки канала связи
+    send_telegram_message("🤖 *Бот-радар успешно запущен на сервере Render!* Начинаю непрерывный мониторинг фьючерсов Bybit.")
     
     prices_history = {}
     
     while True:
-        tickers = await get_bybit_tickers_async()
+        # Запускаем синхронные запросы в фоновом пуле, чтобы не вешать FastAPI
+        loop = asyncio.get_event_loop()
+        tickers = await loop.run_in_executor(None, get_bybit_tickers)
         current_time = time.time()
         
         if tickers:
@@ -126,7 +118,7 @@ async def main_scanner_loop():
                             )
                         
                         LAST_SIGNAL_TIMES[symbol] = current_time
-                        await send_telegram_message_async(msg)
+                        await loop.run_in_executor(None, send_telegram_message, msg)
                         print(f"[СИГНАЛ] Отправлено оповещение по {clean_symbol}")
                         
         await asyncio.sleep(15)
