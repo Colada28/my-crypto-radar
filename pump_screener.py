@@ -6,10 +6,10 @@ import urllib.request
 import urllib.error
 from fastapi import FastAPI
 
-# Твой рабочий токен из BotFather
+# Свежий и чистый токен из BotFather (без пробелов)
 TOKEN = "8941415221:AAHX-1F901LYEatcMEBqJFdTE7QpGbp4t88"
 
-# Точный цифровой ID твоего канала из IDBot
+# Точный цифровой ID твоего канала
 CHAT_ID = -1003959408476
 
 LONG_TRIGGER = 1.0       
@@ -22,12 +22,11 @@ SIGNAL_COOLDOWN = 300
 app = FastAPI()
 
 def send_telegram_message(text):
-    if not TOKEN:
-        print("[КРИТИЧЕСКАЯ ОШИБКА]: Переменная TOKEN пустая!")
-        return
-        
+    # Дополнительная очистка токена внутри кода на случай скрытых переносов строк
+    clean_token = str(TOKEN).strip().replace(" ", "")
+    
     try:
-        url = f"https://api.telegram.org/bot{TOKEN.strip()}/sendMessage"
+        url = f"https://api.telegram.org/bot{clean_token}/sendMessage"
         
         payload_data = {
             "chat_id": CHAT_ID,
