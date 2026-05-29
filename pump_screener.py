@@ -2,16 +2,18 @@ import time
 import asyncio
 import json
 import urllib.request
+import urllib.error
 from fastapi import FastAPI
 
-# ТОКЕН СТРОГО ИЗ СКРИНШОТА 1000112200.JPG
+# ТОКЕН С ТВОЕГО СКРИНШОТА
 TOKEN = "8941415221:AAEUVX08QacNeWRNVcH_UmfW2GuVOBHW0cg"
-CHAT_ID = "@alexey_pump_alerts_new"
 
-# НАСТРОЙКИ ФИЛЬТРАЦИИ И ТРИГГЕРОВ
-LONG_TRIGGER = 1.0       # Памп от +1.0% за 5 минут
-SHORT_TRIGGER = -1.0     # Дамп от -1.0% за 5 минут
-MIN_VOLUME_M = 0.1       # Объем торгов от 100k USDT за 24 часа
+# ОТПРАВЛЯЕМ НАПРЯМУЮ АЛЕКСЕЮ В ЛИЧКУ ДЛЯ ТЕСТА
+CHAT_ID = "5432655543" 
+
+LONG_TRIGGER = 1.0       
+SHORT_TRIGGER = -1.0     
+MIN_VOLUME_M = 0.1       
 
 LAST_SIGNAL_TIMES = {}
 SIGNAL_COOLDOWN = 300    
@@ -36,9 +38,12 @@ def send_telegram_message(text):
         )
         with urllib.request.urlopen(req, timeout=5) as response:
             status = response.getcode()
-            print(f"[ТГ ЛОГ] Сообщение отправлено. Статус: {status}")
+            print(f"[ТГ ЛОГ] УСПЕХ! Статус: {status}")
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode("utf-8")
+        print(f"[ТГ ОШИБКА ОТ СЕРВЕРА]: Код {e.code}, Ответ: {error_body}")
     except Exception as e:
-        print(f"[ТГ ОШИБКА ДЕФЕКТ]: {e}")
+        print(f"[ТГ СИСТЕМНАЯ ОШИБКА]: {e}")
 
 def get_bybit_tickers():
     try:
@@ -53,14 +58,14 @@ def get_bybit_tickers():
 
 async def main_scanner_loop():
     print("🚀 [СИСТЕМА] Асинхронный движок радара запущен!")
+    await asyncio.sleep(3)
     
-    # Стартовый пинг для мгновенной проверки канала связи
-    send_telegram_message("🤖 *Бот-радар успешно запущен на сервере Render!* Начинаю непрерывный мониторинг фьючерсов Bybit.")
+    # Этот пинг придет тебе прямо в ЛС
+    send_telegram_message("🤖 *Бот-радар успешно запустился!* Если ты видишь это сообщение в личке, значит авторизация пробита на 100%.")
     
     prices_history = {}
     
     while True:
-        # Запускаем синхронные запросы в фоновом пуле, чтобы не вешать FastAPI
         loop = asyncio.get_event_loop()
         tickers = await loop.run_in_executor(None, get_bybit_tickers)
         current_time = time.time()
