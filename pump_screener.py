@@ -1,68 +1,56 @@
 import os
 import time
-import asyncio
-import json
-import urllib.request
-import urllib.error
-from fastapi import FastAPI
+import requests
 
+# Твой токен и проверенный ID канала напрямую
 TOKEN = "8941415221:AAHX-1F901LYEatcMEBqJFdTE7QpGbp4t88"
-CHAT_ID = -1003959408476
+CHAT_ID = "-1003959408476"
 
-LONG_TRIGGER = 1.0       
-SHORT_TRIGGER = -1.0     
-MIN_VOLUME_M = 0.1       
+# НАСТРОЙКИ ФИЛЬТРАЦИИ МУСОРА
+LONG_TRIGGER = 1.0       # Импульс вверх от 1%
+SHORT_TRIGGER = -1.0     # Импульс вниз от -1%
+MIN_VOLUME_M = 5.0       # Монеты с объемом торгов МЕНЬШЕ 5 млн $ бот будет игнорировать
 
 LAST_SIGNAL_TIMES = {}
-SIGNAL_COOLDOWN = 300    
-
-app = FastAPI()
+SIGNAL_COOLDOWN = 300    # Защита от спама одной монетой (5 минут)
 
 def send_telegram_message(text):
-    clean_token = str(TOKEN).strip().replace(" ", "")
     try:
-        url = f"https://api.telegram.org/bot{clean_token}/sendMessage"
-        payload_data = {
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        payload = {
             "chat_id": CHAT_ID,
             "text": text,
-            "parse_mode": "Markdown",
-            "disable_web_page_preview": True
+            "parse_mode": "Markdown"
         }
-        payload = json.dumps(payload_data, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(
-            url, 
-            data=payload, 
-            headers={"Content-Type": "application/json; charset=utf-8", "User-Agent": "Mozilla/5.0"},
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=5) as response:
-            print(f"[ТГ ЛОГ] Сообщение успешно отправлено! Статус: {response.getcode()}")
-    except urllib.error.HTTPError as e:
-        print(f"[ТГ ОШИБКА]: Код {e.code}, Ответ: {e.read().decode('utf-8')}")
+        r = requests.post(url, json=payload, timeout=5)
+        if r.status_code == 200:
+            print(f"[ТГ ЛОГ] Аalert отправлен успешно!")
+        else:
+            print(f"[ТГ ОШИБКА]: Код {r.status_code}, Ответ: {r.text}")
     except Exception as e:
-        print(f"[ТГ СИСТЕМНАЯ ОШИБКА]: {e}")
+        print(f"[СИСТЕМНАЯ ОШИБКА ТГ]: {e}")
 
 def get_bybit_tickers():
     try:
         url = "https://api.bybit.com/v5/market/tickers?category=linear"
-        with urllib.request.urlopen(url, timeout=5) as response:
-            data = json.loads(response.read().decode("utf-8"))
-            if data.get("retCode") == 0:
-                return data["result"]["list"]
+        r = requests.get(url, timeout=5)
+        data = r.json()
+        if data.get("retCode") == 0:
+            return data["result"]["list"]
     except Exception as e:
         print(f"[BYBIT ОШИБКА]: {e}")
     return []
 
-async def main_scanner_loop():
-    print("🚀 [СИСТЕМА] Сканер Bybit запущен напрямую через Uvicorn!")
-    await asyncio.sleep(5)
+def main_scanner():
+    print("🚀 Сканер Bybit запущен в простом режиме...")
     
-    send_telegram_message("🤖 *Бот-радар успешно запущен напрямую через FastAPI на Render!*")
+    # Сразу шлем тестовый алерт в канал, чтобы проверить связь
+    send_telegram_message("🤖 Бот-радар успешно запущен и фильтрует мелкие монеты!")
     
     prices_history = {}
+    
     while True:
-        loop = asyncio.get_event_loop()
-        tickers = await loop.run_in_executor(None, get_bybit_tickers)
+        tickers = get_bybit_tickers()
         current_time = time.time()
         
         if tickers:
@@ -73,6 +61,10 @@ async def main_scanner_loop():
                     
                 current_price = float(ticker["lastPrice"])
                 volume_24h = float(ticker["turnover24h"]) / 1_000_000 
+                
+                # Фильтр мелких монет: если объем меньше 5 млн USDT — пропускаем ее
+                if volume_24h < MIN_VOLUME_M:
+                    continue
                 
                 if symbol not in prices_history:
                     prices_history[symbol] = []
@@ -86,47 +78,38 @@ async def main_scanner_loop():
                     
                 price_change = ((current_price - old_price) / old_price) * 100
                 
-                if volume_24h >= MIN_VOLUME_M:
-                    is_long = price_change >= LONG_TRIGGER
-                    is_short = price_change <= SHORT_TRIGGER
+                is_long = price_change >= LONG_TRIGGER
+                is_short = price_change <= SHORT_TRIGGER
+                
+                if is_long or is_short:
+                    if symbol in LAST_SIGNAL_TIMES:
+                        if current_time - LAST_SIGNAL_TIMES[symbol] < SIGNAL_COOLDOWN:
+                            continue
                     
-                    if is_long or is_short:
-                        if symbol in LAST_SIGNAL_TIMES:
-                            if current_time - LAST_SIGNAL_TIMES[symbol] < SIGNAL_COOLDOWN:
-                                continue
-                        
-                        clean_symbol = symbol.replace("USDT", "")
-                        coinglass_url = f"https://www.coinglass.com/pro/futures/LiquidationChart/BingX/{clean_symbol}"
-                        
-                        if is_long:
-                            msg = (
-                                f"🟢 *ИМПУЛЬС ВВЕРХ* 📈\n\n"
-                                f"🔹 *Монета:* #{clean_symbol} (BingX)\n"
-                                f"📊 *Изменение за 5м:* +{price_change:.2f}%\n"
-                                f"💰 *Цена:* {current_price}\n"
-                                f"💵 *Объем 24h:* {volume_24h:.2f}M USDT\n\n"
-                                f"🔗 [Открыть график на Coinglass]({coinglass_url})"
-                            )
-                        else:
-                            msg = (
-                                f"🔴 *ИМПУЛЬС ВНИЗ* 📉\n\n"
-                                f"🔹 *Монета:* #{clean_symbol} (BingX)\n"
-                                f"📊 *Изменение за 5м:* {price_change:.2f}%\n"
-                                f"💰 *Цена:* {current_price}\n"
-                                f"💵 *Объем 24h:* {volume_24h:.2f}M USDT\n\n"
-                                f"🔗 [Открыть график на Coinglass]({coinglass_url})"
-                            )
-                        
-                        LAST_SIGNAL_TIMES[symbol] = current_time
-                        await loop.run_in_executor(None, send_telegram_message, msg)
-                        print(f"[СИГНАЛ] Отправлено оповещение по {clean_symbol}")
-                        
-        await asyncio.sleep(15)
+                    clean_symbol = symbol.replace("USDT", "")
+                    
+                    if is_long:
+                        msg = (
+                            f"🟢 *ИМПУЛЬС ВВЕРХ*\n"
+                            f"🔹 *Монета:* #{clean_symbol}\n"
+                            f"📊 *Изменение за 5м:* +{price_change:.2f}%\n"
+                            f"💰 *Цена:* {current_price}\n"
+                            f"💵 *Объем 24h:* {volume_24h:.2f}M USDT"
+                        )
+                    else:
+                        msg = (
+                            f"🔴 *ИМПУЛЬС ВНИЗ*\n"
+                            f"🔹 *Монета:* #{clean_symbol}\n"
+                            f"📊 *Изменение за 5м:* {price_change:.2f}%\n"
+                            f"💰 *Цена:* {current_price}\n"
+                            f"💵 *Объем 24h:* {volume_24h:.2f}M USDT"
+                        )
+                    
+                    LAST_SIGNAL_TIMES[symbol] = current_time
+                    send_telegram_message(msg)
+                    print(f"[СИГНАЛ] Отправлен алерт по {clean_symbol}")
+                    
+        time.sleep(15)
 
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(main_scanner_loop())
-
-@app.get("/")
-async def read_root():
-    return {"status": "working"}
+if __name__ == "__main__":
+    main_scanner()
