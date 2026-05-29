@@ -1,12 +1,7 @@
-import os
+import requests
 import time
-import asyncio
-import json
-import urllib.request
-import urllib.error
-from fastapi import FastAPI
 
-# Новый токен со скриншота 1000112217.jpg вшит напрямую без ошибок
+# Твой новый рабочий токен и канал
 TOKEN = "8941415221:AAHX-1F901LYEatcMEBqJFdTE7QpGbp4t88"
 CHAT_ID = "@alexey_pump_alerts_new"
 
@@ -17,62 +12,47 @@ MIN_VOLUME_M = 0.1
 LAST_SIGNAL_TIMES = {}
 SIGNAL_COOLDOWN = 300    
 
-app = FastAPI()
-
 def send_telegram_message(text):
     if not TOKEN:
-        print("[КРИТИЧЕСКАЯ ОШИБКА]: Переменная TOKEN пустая!")
         return
-        
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": text,
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True
+    }
     try:
-        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        
-        payload_data = {
-            "chat_id": CHAT_ID,
-            "text": text,
-            "parse_mode": "Markdown",
-            "disable_web_page_preview": True
-        }
-        # Кодируем строку в байты UTF-8 для urllib
-        payload = json.dumps(payload_data).encode("utf-8")
-        
-        req = urllib.request.Request(
-            url, 
-            data=payload, 
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=5) as response:
-            status = response.getcode()
-            print(f"[ТГ ЛОГ] Сообщение успешно отправлено! Статус: {status}")
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8")
-        print(f"[ТГ ОШИБКА ОТ СЕРВЕРА TELEGRAM]: Код {e.code}, Ответ: {error_body}")
+        response = requests.post(url, json=payload, timeout=5)
+        if response.status_code == 200:
+            print("[ТГ ЛОГ] Сообщение успешно отправлено!")
+        else:
+            print(f"[ТГ ОШИБКА]: Код {response.status_code}, Ответ: {response.text}")
     except Exception as e:
         print(f"[ТГ СИСТЕМНАЯ ОШИБКА]: {e}")
 
 def get_bybit_tickers():
+    url = "https://api.bybit.com/v5/market/tickers?category=linear"
     try:
-        url = "https://api.bybit.com/v5/market/tickers?category=linear"
-        with urllib.request.urlopen(url, timeout=5) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
             if data.get("retCode") == 0:
                 return data["result"]["list"]
     except Exception as e:
         print(f"[BYBIT ОШИБКА]: {e}")
     return []
 
-async def main_scanner_loop():
+def main():
     print("🚀 [СИСТЕМА] Фоновый движок сканера Bybit запущен успешно!")
-    await asyncio.sleep(5)
+    time.sleep(5)
     
-    send_telegram_message("🤖 *Бот-радар успешно запущен с новым токеном на Render!*")
+    send_telegram_message("🤖 *Бот-радар успешно запущен на Render по старому коду!*")
     
     prices_history = {}
     
     while True:
-        loop = asyncio.get_event_loop()
-        tickers = await loop.run_in_executor(None, get_bybit_tickers)
+        tickers = get_bybit_tickers()
         current_time = time.time()
         
         if tickers:
@@ -128,15 +108,10 @@ async def main_scanner_loop():
                             )
                         
                         LAST_SIGNAL_TIMES[symbol] = current_time
-                        await loop.run_in_executor(None, send_telegram_message, msg)
+                        send_telegram_message(msg)
                         print(f"[СИГНАЛ] Отправлено оповещение по {clean_symbol}")
                         
-        await asyncio.sleep(15)
+        time.sleep(15)
 
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(main_scanner_loop())
-
-@app.get("/")
-async def read_root():
-    return {"status": "working"}
+if __name__ == "__main__":
+    main()
