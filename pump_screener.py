@@ -6,8 +6,8 @@ import urllib.request
 import urllib.error
 from fastapi import FastAPI
 
-# Бот автоматически заберет токен из панели управления Render
-TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
+# Новый токен со скриншота 1000112217.jpg вшит напрямую без ошибок
+TOKEN = "8941415221:AAHX-1F901LYEatcMEBqJFdTE7QpGbp4t88"
 CHAT_ID = "@alexey_pump_alerts_new"
 
 LONG_TRIGGER = 1.0       
@@ -21,19 +21,19 @@ app = FastAPI()
 
 def send_telegram_message(text):
     if not TOKEN:
-        print("[КРИТИЧЕСКАЯ ОШИБКА]: Переменная TELEGRAM_TOKEN не найдена в настройках Render!")
+        print("[КРИТИЧЕСКАЯ ОШИБКА]: Переменная TOKEN пустая!")
         return
         
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
         
-        # Исправлено: принудительно кодируем словарь в JSON-строку, а затем в байты UTF-8
         payload_data = {
             "chat_id": CHAT_ID,
             "text": text,
             "parse_mode": "Markdown",
             "disable_web_page_preview": True
         }
+        # Кодируем строку в байты UTF-8 для urllib
         payload = json.dumps(payload_data).encode("utf-8")
         
         req = urllib.request.Request(
@@ -66,7 +66,7 @@ async def main_scanner_loop():
     print("🚀 [СИСТЕМА] Фоновый движок сканера Bybit запущен успешно!")
     await asyncio.sleep(5)
     
-    send_telegram_message("🤖 *Бот-радар успешно запущен и работает в штатном режиме на Render!*")
+    send_telegram_message("🤖 *Бот-радар успешно запущен с новым токеном на Render!*")
     
     prices_history = {}
     
