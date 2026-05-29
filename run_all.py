@@ -16,7 +16,7 @@ def start_simple_http_server():
     httpd.serve_forever()
 
 if __name__ == "__main__":
-    # Запуск веб-сервера в отдельном потоке, чтобы Render не выдавал ошибку портов
+    # Запуск веб-сервера в отдельном потоке для заглушки Render
     threading.Thread(target=start_simple_http_server, daemon=True).start()
     
     # Запуск твоего главного работающего скрипта
