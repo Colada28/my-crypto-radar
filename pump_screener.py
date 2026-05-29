@@ -5,15 +5,14 @@ import urllib.request
 import urllib.error
 from fastapi import FastAPI
 
-# ТОКЕН С ТВОЕГО СКРИНШОТА
-TOKEN = "8941415221:AAEUVX08QacNeWRNVcH_UmfW2GuVOBHW0cg"
+# СВЕЖИЙ ТОКЕН ИЗ СКРИНШОТА 1000112216.JPG
+TOKEN = "8941415221:AAFvQ0UbOWkhs7wZk1sZbfadd_35daf9RwE"
+CHAT_ID = "@alexey_pump_alerts_new"
 
-# ОТПРАВЛЯЕМ НАПРЯМУЮ АЛЕКСЕЮ В ЛИЧКУ ДЛЯ ТЕСТА
-CHAT_ID = "5432655543" 
-
-LONG_TRIGGER = 1.0       
-SHORT_TRIGGER = -1.0     
-MIN_VOLUME_M = 0.1       
+# НАСТРОЙКИ ФИЛЬТРАЦИИ
+LONG_TRIGGER = 1.0       # Памп от +1.0% за 5 минут
+SHORT_TRIGGER = -1.0     # Дамп от -1.0% за 5 минут
+MIN_VOLUME_M = 0.1       # Минимальный объем торгов за 24ч (0.1M = 100k USDT)
 
 LAST_SIGNAL_TIMES = {}
 SIGNAL_COOLDOWN = 300    
@@ -38,10 +37,10 @@ def send_telegram_message(text):
         )
         with urllib.request.urlopen(req, timeout=5) as response:
             status = response.getcode()
-            print(f"[ТГ ЛОГ] УСПЕХ! Статус: {status}")
+            print(f"[ТГ ЛОГ] Сообщение успешно отправлено! Статус: {status}")
     except urllib.error.HTTPError as e:
         error_body = e.read().decode("utf-8")
-        print(f"[ТГ ОШИБКА ОТ СЕРВЕРА]: Код {e.code}, Ответ: {error_body}")
+        print(f"[ТГ ОШИБКА ОТ СЕРВЕРА TELEGRAM]: Код {e.code}, Ответ: {error_body}")
     except Exception as e:
         print(f"[ТГ СИСТЕМНАЯ ОШИБКА]: {e}")
 
@@ -57,11 +56,11 @@ def get_bybit_tickers():
     return []
 
 async def main_scanner_loop():
-    print("🚀 [СИСТЕМА] Асинхронный движок радара запущен!")
+    print("🚀 [СИСТЕМА] Фоновый движок сканера Bybit запущен успешно!")
     await asyncio.sleep(3)
     
-    # Этот пинг придет тебе прямо в ЛС
-    send_telegram_message("🤖 *Бот-радар успешно запустился!* Если ты видишь это сообщение в личке, значит авторизация пробита на 100%.")
+    # Стартовый пинг в канал для проверки связи
+    send_telegram_message("🤖 *Бот-радар успешно запущен на Render с новым токеном!* Начинаю непрерывный мониторинг рынка.")
     
     prices_history = {}
     
