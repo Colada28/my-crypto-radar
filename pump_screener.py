@@ -1,3 +1,4 @@
+import os
 import time
 import asyncio
 import json
@@ -5,14 +6,13 @@ import urllib.request
 import urllib.error
 from fastapi import FastAPI
 
-# СВЕЖИЙ ТОКЕН ИЗ СКРИНШОТА 1000112216.JPG
-TOKEN = "8941415221:AAFvQ0UbOWkhs7wZk1sZbfadd_35daf9RwE"
+# Бот автоматически заберет токен из панели управления Render
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 CHAT_ID = "@alexey_pump_alerts_new"
 
-# НАСТРОЙКИ ФИЛЬТРАЦИИ
-LONG_TRIGGER = 1.0       # Памп от +1.0% за 5 минут
-SHORT_TRIGGER = -1.0     # Дамп от -1.0% за 5 минут
-MIN_VOLUME_M = 0.1       # Минимальный объем торгов за 24ч (0.1M = 100k USDT)
+LONG_TRIGGER = 1.0       
+SHORT_TRIGGER = -1.0     
+MIN_VOLUME_M = 0.1       
 
 LAST_SIGNAL_TIMES = {}
 SIGNAL_COOLDOWN = 300    
@@ -20,6 +20,10 @@ SIGNAL_COOLDOWN = 300
 app = FastAPI()
 
 def send_telegram_message(text):
+    if not TOKEN:
+        print("[КРИТИЧЕСКАЯ ОШИБКА]: Переменная TELEGRAM_TOKEN не найдена в настройках Render!")
+        return
+        
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
         payload = json.dumps({
@@ -57,10 +61,9 @@ def get_bybit_tickers():
 
 async def main_scanner_loop():
     print("🚀 [СИСТЕМА] Фоновый движок сканера Bybit запущен успешно!")
-    await asyncio.sleep(3)
+    await asyncio.sleep(5)
     
-    # Стартовый пинг в канал для проверки связи
-    send_telegram_message("🤖 *Бот-радар успешно запущен на Render с новым токеном!* Начинаю непрерывный мониторинг рынка.")
+    send_telegram_message("🤖 *Бот-радар успешно запущен через Environment Variables на Render!*")
     
     prices_history = {}
     
