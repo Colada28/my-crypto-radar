@@ -1,4 +1,3 @@
-pybit
 requests
-pyTelegramBotAPI
-
+fastapi
+uvicorn
