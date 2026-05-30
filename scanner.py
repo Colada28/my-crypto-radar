@@ -89,6 +89,7 @@ def scan_binance():
 def radar_loop():
     print("Radar loop started")
     send("🟢 Binance радар запущен")
+    send("🔧 Тестовое сообщение — бот работает")   # ← ДОБАВЛЕНО
     while True:
         try:
             scan_binance()
