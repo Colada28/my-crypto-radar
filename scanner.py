@@ -10,11 +10,11 @@ TOKEN = "8941415221:AAHX-1F901LYEatcMEBqJFdTE7QpGbp4t88"
 CHAT_ID = "-1003959408476"
 
 # ---------- ТЕСТОВЫЕ ПОРОГИ ----------
-INTERVAL_SEC = 60
-WINDOW_MIN = 5
-PUMP_THRESHOLD = 0.5
-DUMP_THRESHOLD = -0.5
-MIN_VOLUME_USDT = 10_000
+INTERVAL_SEC = 60          # опрос каждые 60 сек
+WINDOW_MIN = 5             # окно анализа 5 минут
+PUMP_THRESHOLD = 0.5       # памп >= +0.5%
+DUMP_THRESHOLD = -0.5      # дамп <= -0.5%
+MIN_VOLUME_USDT = 10_000   # минимальный объём за окно
 
 # ---------- TELEGRAM ----------
 def send(msg: str):
@@ -63,9 +63,11 @@ def scan_binance():
 
         change_pct = (now_price - past_price) / past_price * 100
 
+        # фильтр по объёму
         if window_volume * now_price < MIN_VOLUME_USDT:
             continue
 
+        # памп
         if change_pct >= PUMP_THRESHOLD:
             send(
                 f"🚀 <b>PUMP</b>\n"
@@ -74,6 +76,7 @@ def scan_binance():
                 f"Объём: ~{int(window_volume * now_price):,} USDT"
             )
 
+        # дамп
         elif change_pct <= DUMP_THRESHOLD:
             send(
                 f"💥 <b>DUMP</b>\n"
@@ -91,14 +94,11 @@ def radar_loop():
             print("Ошибка в radar_loop:", e)
         time.sleep(INTERVAL_SEC)
 
+# ---------- FLASK ----------
 app = Flask(__name__)
 
 @app.route("/")
 def home():
     return "OK"
 
-if __name__ == "__main__":
-    t = threading.Thread(target=radar_loop)
-    t.daemon = True
-    t.start()
-    app.run(host="0.0.0.0", port=10000)
+# ----------
