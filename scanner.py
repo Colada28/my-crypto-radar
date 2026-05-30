@@ -15,7 +15,7 @@ PUMP_THRESHOLD = 0.1
 DUMP_THRESHOLD = -0.1
 MIN_VOLUME_USDT = 1000
 
-# ---------- TELEGRAM ОТПРАВКА ----------
+# ---------- TELEGRAM ОТПРАВКА (ДИАГНОСТИКА) ----------
 def send(msg: str):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     data = {
@@ -27,7 +27,10 @@ def send(msg: str):
 
     try:
         r = requests.post(url, data=data, timeout=10)
-        print("Telegram status:", r.status_code, r.text)
+        print("=== TELEGRAM DEBUG ===")
+        print("Status:", r.status_code)
+        print("Response:", r.text)
+        print("======================")
     except Exception as e:
         print("Telegram error:", e)
 
@@ -91,7 +94,7 @@ def scan_binance():
 # ---------- ПОТОК РАДАРА ----------
 def radar_loop():
     print("Radar loop started")
-    send("🟢 Binance радар запущен (новый бот + новый канал)")
+    send("🟢 Binance радар запущен (диагностика включена)")
     while True:
         try:
             scan_binance()
