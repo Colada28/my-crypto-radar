@@ -5,7 +5,7 @@ import requests
 from flask import Flask
 
 # ---------- TELEGRAM ----------
-TOKEN = "8941415221:AAHX-1F901LYEatcMEBqJFdTE7QpGbp4t88"
+TOKEN = "8941415221:AAFvQ0Ub0Wkhs7wZk1sZbfadd_35daf9RwE"
 CHAT_ID = "-1003959408476"
 
 # ---------- НАСТРОЙКИ РАДАРА ----------
@@ -17,14 +17,19 @@ MIN_VOLUME_USDT = 10_000
 
 # ---------- TELEGRAM ОТПРАВКА ----------
 def send(msg: str):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    data = {
+        "chat_id": CHAT_ID,
+        "text": msg,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
+    }
+
     try:
-        requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-            data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"},
-            timeout=5
-        )
-    except:
-        pass
+        r = requests.post(url, data=data, timeout=10)
+        print("Telegram status:", r.status_code, r.text)
+    except Exception as e:
+        print("Telegram error:", e)
 
 # ---------- BINANCE ----------
 binance = ccxt.binance()
