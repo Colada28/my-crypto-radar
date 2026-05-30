@@ -1,37 +1,3 @@
-import time
-import threading
-import ccxt
-import requests
-from flask import Flask
-
-# ---------- TELEGRAM ----------
-TOKEN = "8885217062:AAHo5SbHW9eppPIRmJF3fyFmsvo0IsMPDzw"
-CHAT_ID = "-1003959408476"
-
-# ---------- НАСТРОЙКИ РАДАРА ----------
-INTERVAL_SEC = 60
-WINDOW_MIN = 5
-PUMP_THRESHOLD = 0.1
-DUMP_THRESHOLD = -0.1
-MIN_VOLUME_USDT = 1000
-
-# ---------- TELEGRAM ОТПРАВКА ----------
-def send(msg: str):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    data = {
-        "chat_id": CHAT_ID,
-        "text": msg,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
-    }
-    try:
-        requests.post(url, data=data, timeout=5)
-    except Exception as e:
-        print("Telegram error:", e)
-
-# ---------- BINANCE ----------
-binance = ccxt.binance()
-
 def scan_binance():
     try:
         markets = binance.load_markets()
@@ -72,42 +38,28 @@ def scan_binance():
 
         if change_pct >= PUMP_THRESHOLD:
             send(
-                f"🚀 <b>PUMP</b>\n"
-                f"<b>{symbol}</b>\n"
-                f"Изм.: <b>+{change_pct:.2f}%</b> за {WINDOW_MIN} мин\n"
-                f"Объём: ~{int(window_volume * now_price):,} USDT"
-            )
-        elif change_pct <= DUMP_THRESHOLD:
-            send(
-                f"💥 <b>DUMP</b>\n"
-                f"<b>{symbol}</b>\n"
-                f"Изм.: <b>{change_pct:.2f}%</b> за {WINDOW_MIN} мин\n"
-                f"Объём: ~{int(window_volume * now_price):,} USDT"
+                f"PUMP\n"
+                f"{symbol}\n"
+                f"Изменение: {change_pct:.2f}% за {WINDOW_MIN} минут\n"
+                f"Объём: {int(window_volume * now_price)} USDT"
             )
 
-# ---------- ПОТОК РАДАРА ----------
+        elif change_pct <= DUMP_THRESHOLD:
+            send(
+                f"DUMP\n"
+                f"{symbol}\n"
+                f"Изменение: {change_pct:.2f}% за {WINDOW_MIN} минут\n"
+                f"Объём: {int(window_volume * now_price)} USDT"
+            )
+
+
 def radar_loop():
     print("Radar loop started")
-    send("🟢 Binance радар запущен")
-    send("🔧 Тестовое сообщение — бот работает")   # ← ДОБАВЛЕНО
+    send("Binance radar started")
+    send("Test message: bot is working")
     while True:
         try:
             scan_binance()
         except Exception as e:
             print("Ошибка в radar_loop:", e)
         time.sleep(INTERVAL_SEC)
-
-# ---------- FLASK ----------
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "OK"
-
-# ---------- ГАРАНТИРОВАННЫЙ ЗАПУСК ----------
-if __name__ == "__main__":
-    time.sleep(2)
-    t = threading.Thread(target=radar_loop)
-    t.daemon = True
-    t.start()
-    app.run(host="0.0.0.0", port=10000)
