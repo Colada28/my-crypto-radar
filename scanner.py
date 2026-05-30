@@ -5,7 +5,7 @@ import requests
 from flask import Flask
 
 # ---------- TELEGRAM ----------
-TOKEN = "8941415221:AAFvQ0Ub0Wkhs7wZk1sZbfadd_35daf9RwE"
+TOKEN = "8885217062:AAFkK53jJdB9i01YhRRzRkhFuZrITKrNw_I"
 CHAT_ID = "-1003959408476"
 
 # ---------- НАСТРОЙКИ РАДАРА ----------
@@ -91,7 +91,7 @@ def scan_binance():
 # ---------- ПОТОК РАДАРА ----------
 def radar_loop():
     print("Radar loop started")
-    send("🟢 Binance радар запущен (тестовые пороги)")
+    send("🟢 Binance радар запущен (новый бот + новый канал)")
     while True:
         try:
             scan_binance()
