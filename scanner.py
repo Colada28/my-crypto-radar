@@ -1,12 +1,19 @@
+# ===== DOUBLE FORCE UPDATE =====
+FORCE_ID = "2026-05-30-20-55-MG-ALEXEY-DOUBLE-2"
+print("DOUBLE FORCE UPDATE ACTIVE:", FORCE_ID)
+# ===============================
+
 import time
 import threading
 import ccxt
 import requests
 from flask import Flask
 
-# ---------- FORCE UPDATE ----------
-FORCE_ID = "2026-05-30-20-50-MG-ALEXEY-1"
-print("FORCE UPDATE ACTIVE:", FORCE_ID)
+# Фейковый импорт для принудительного обновления
+try:
+    import math as _force_update_trigger
+except:
+    pass
 
 # ---------- TELEGRAM ----------
 TOKEN = "8885217062:AAFkK53jJdB9i01YhRRzRkhFuZrITKrNw_I"
@@ -21,6 +28,8 @@ MIN_VOLUME_USDT = 1000
 
 # ---------- TELEGRAM ОТПРАВКА (ДИАГНОСТИКА) ----------
 def send(msg: str):
+    print("SEND() CALLED — FORCE:", FORCE_ID)
+
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     data = {
         "chat_id": CHAT_ID,
@@ -80,25 +89,14 @@ def scan_binance():
             continue
 
         if change_pct >= PUMP_THRESHOLD:
-            send(
-                f"🚀 <b>PUMP</b>\n"
-                f"Binance — <b>{symbol}</b>\n"
-                f"Изм.: <b>+{change_pct:.2f}%</b> за {WINDOW_MIN} мин\n"
-                f"Объём: ~{int(window_volume * now_price):,} USDT"
-            )
-
+            send(f"🚀 <b>PUMP</b>\n{symbol}\nИзм.: +{change_pct:.2f}%")
         elif change_pct <= DUMP_THRESHOLD:
-            send(
-                f"💥 <b>DUMP</b>\n"
-                f"Binance — <b>{symbol}</b>\n"
-                f"Изм.: <b>{change_pct:.2f}%</b> за {WINDOW_MIN} мин\n"
-                f"Объём: ~{int(window_volume * now_price):,} USDT"
-            )
+            send(f"💥 <b>DUMP</b>\n{symbol}\nИзм.: {change_pct:.2f}%")
 
 # ---------- ПОТОК РАДАРА ----------
 def radar_loop():
-    print("Radar loop started — FORCE:", FORCE_ID)
-    send("🟢 Binance радар запущен (принудительное обновление + диагностика)")
+    print("Radar loop started — DOUBLE FORCE:", FORCE_ID)
+    send("🟢 Binance радар запущен (DOUBLE FORCE + диагностика)")
     while True:
         try:
             scan_binance()
@@ -111,13 +109,13 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "OK — FORCE " + FORCE_ID
+    return "OK — DOUBLE FORCE " + FORCE_ID
 
 # ---------- ГАРАНТИРОВАННЫЙ ЗАПУСК ----------
 if __name__ == "__main__":
+    print("MAIN STARTED — FORCE:", FORCE_ID)
     time.sleep(2)
     t = threading.Thread(target=radar_loop)
     t.daemon = True
     t.start()
-
     app.run(host="0.0.0.0", port=10000)
