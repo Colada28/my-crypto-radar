@@ -1,8 +1,3 @@
-# ===== SUPER DEBUG FORCE UPDATE =====
-FORCE_ID = "2026-05-30-21-00-MG-ALEXEY-SUPERDEBUG-3"
-print("SUPER DEBUG ACTIVE:", FORCE_ID, flush=True)
-# ====================================
-
 import time
 import threading
 import ccxt
@@ -10,20 +5,18 @@ import requests
 from flask import Flask
 
 # ---------- TELEGRAM ----------
-TOKEN = "8885217062:AAFkK53jJdB9i01YhRRzRkhFuZrITKrNw_I"
+TOKEN = "8885217062:AAFkK53jJdB9i01YhRRzRkhFuZrITKrNW_I"
 CHAT_ID = "-1003959408476"
 
-# ---------- НАСТРОЙКИ ----------
-INTERVAL_SEC = 60
-WINDOW_MIN = 5
-PUMP_THRESHOLD = 0.1
-DUMP_THRESHOLD = -0.1
-MIN_VOLUME_USDT = 1000
+# ---------- НАСТРОЙКИ РАДАРА ----------
+INTERVAL_SEC = 60          # интервал между сканами (сек)
+WINDOW_MIN = 5             # окно анализа (минут)
+PUMP_THRESHOLD = 0.1       # порог роста (%)
+DUMP_THRESHOLD = -0.1      # порог падения (%)
+MIN_VOLUME_USDT = 1000     # минимальный объём в USDT
 
-# ---------- SUPER DEBUG SEND ----------
+# ---------- TELEGRAM ОТПРАВКА ----------
 def send(msg: str):
-    print("SEND() START — FORCE:", FORCE_ID, flush=True)
-
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     data = {
         "chat_id": CHAT_ID,
@@ -31,21 +24,10 @@ def send(msg: str):
         "parse_mode": "HTML",
         "disable_web_page_preview": True
     }
-
     try:
-        print("POSTING TO TELEGRAM...", flush=True)
-        r = requests.post(url, data=data, timeout=3)
-        print("POST DONE", flush=True)
-
-        print("=== TELEGRAM DEBUG ===", flush=True)
-        print("Status:", r.status_code, flush=True)
-        print("Response:", r.text, flush=True)
-        print("======================", flush=True)
-
+        requests.post(url, data=data, timeout=5)
     except Exception as e:
-        print("TELEGRAM EXCEPTION:", str(e), flush=True)
-
-    print("SEND() END", flush=True)
+        print("Telegram error:", e)
 
 # ---------- BINANCE ----------
 binance = ccxt.binance()
@@ -54,7 +36,7 @@ def scan_binance():
     try:
         markets = binance.load_markets()
     except Exception as e:
-        print("Ошибка load_markets:", e, flush=True)
+        print("Ошибка load_markets:", e)
         return
 
     symbols = [s for s in markets if s.endswith("/USDT")]
@@ -89,19 +71,29 @@ def scan_binance():
             continue
 
         if change_pct >= PUMP_THRESHOLD:
-            send(f"PUMP {symbol} +{change_pct:.2f}%")
+            send(
+                f"🚀 <b>PUMP</b>\n"
+                f"Binance — <b>{symbol}</b>\n"
+                f"Изм.: <b>+{change_pct:.2f}%</b> за {WINDOW_MIN} мин\n"
+                f"Объём: ~{int(window_volume * now_price):,} USDT"
+            )
         elif change_pct <= DUMP_THRESHOLD:
-            send(f"DUMP {symbol} {change_pct:.2f}%")
+            send(
+                f"💥 <b>DUMP</b>\n"
+                f"Binance — <b>{symbol}</b>\n"
+                f"Изм.: <b>{change_pct:.2f}%</b> за {WINDOW_MIN} мин\n"
+                f"Объём: ~{int(window_volume * now_price):,} USDT"
+            )
 
-# ---------- ПОТОК ----------
+# ---------- ПОТОК РАДАРА ----------
 def radar_loop():
-    print("Radar loop started — SUPER DEBUG:", FORCE_ID, flush=True)
-    send("🟢 SUPER DEBUG MODE ACTIVE")
+    print("Radar loop started")
+    send("🟢 Binance радар запущен")
     while True:
         try:
             scan_binance()
         except Exception as e:
-            print("Ошибка в radar_loop:", e, flush=True)
+            print("Ошибка в radar_loop:", e)
         time.sleep(INTERVAL_SEC)
 
 # ---------- FLASK ----------
@@ -109,12 +101,11 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "OK — SUPER DEBUG " + FORCE_ID
+    return "OK"
 
-# ---------- MAIN ----------
+# ---------- ГАРАНТИРОВАННЫЙ ЗАПУСК ----------
 if __name__ == "__main__":
-    print("MAIN STARTED — SUPER DEBUG:", FORCE_ID, flush=True)
-    time.sleep(1)
+    time.sleep(2)
     t = threading.Thread(target=radar_loop)
     t.daemon = True
     t.start()
