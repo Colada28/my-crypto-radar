@@ -4,6 +4,10 @@ import ccxt
 import requests
 from flask import Flask
 
+# ---------- FORCE UPDATE ----------
+FORCE_ID = "2026-05-30-20-50-MG-ALEXEY-1"
+print("FORCE UPDATE ACTIVE:", FORCE_ID)
+
 # ---------- TELEGRAM ----------
 TOKEN = "8885217062:AAFkK53jJdB9i01YhRRzRkhFuZrITKrNw_I"
 CHAT_ID = "-1003959408476"
@@ -93,8 +97,8 @@ def scan_binance():
 
 # ---------- ПОТОК РАДАРА ----------
 def radar_loop():
-    print("Radar loop started")
-    send("🟢 Binance радар запущен (диагностика включена)")
+    print("Radar loop started — FORCE:", FORCE_ID)
+    send("🟢 Binance радар запущен (принудительное обновление + диагностика)")
     while True:
         try:
             scan_binance()
@@ -107,7 +111,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "OK"
+    return "OK — FORCE " + FORCE_ID
 
 # ---------- ГАРАНТИРОВАННЫЙ ЗАПУСК ----------
 if __name__ == "__main__":
