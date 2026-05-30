@@ -5,15 +5,15 @@ import requests
 from flask import Flask
 
 # ---------- TELEGRAM ----------
-TOKEN = "8885217062:AAFkK53jJdB9i01YhRRzRkhFuZrITKrNW_I"
+TOKEN = "8885217062:AAHo5SbHW9eppPIRmJF3fyFmsvo0IsMPDzw"
 CHAT_ID = "-1003959408476"
 
 # ---------- НАСТРОЙКИ РАДАРА ----------
-INTERVAL_SEC = 60          # интервал между сканами (сек)
-WINDOW_MIN = 5             # окно анализа (минут)
-PUMP_THRESHOLD = 0.1       # порог роста (%)
-DUMP_THRESHOLD = -0.1      # порог падения (%)
-MIN_VOLUME_USDT = 1000     # минимальный объём в USDT
+INTERVAL_SEC = 60
+WINDOW_MIN = 5
+PUMP_THRESHOLD = 0.1
+DUMP_THRESHOLD = -0.1
+MIN_VOLUME_USDT = 1000
 
 # ---------- TELEGRAM ОТПРАВКА ----------
 def send(msg: str):
