@@ -9,11 +9,11 @@ TOKEN = "8885217062:AAHo5SbHW9eppPIRmJF3fyFmsvo0IsMPDzw"
 CHAT_ID = "-1003959408476"
 
 # ---------- НАСТРОЙКИ РАДАРА ----------
-INTERVAL_SEC = 60
-WINDOW_MIN = 5
-PUMP_THRESHOLD = 0.1
-DUMP_THRESHOLD = -0.1
-MIN_VOLUME_USDT = 1000
+INTERVAL_SEC = 60          # интервал между сканами (сек)
+WINDOW_MIN = 5             # окно анализа (минут)
+PUMP_THRESHOLD = 0.1       # порог роста (%)
+DUMP_THRESHOLD = -0.1      # порог падения (%)
+MIN_VOLUME_USDT = 1000     # минимальный объём в USDT
 
 # ---------- TELEGRAM ОТПРАВКА ----------
 def send(msg: str):
@@ -73,14 +73,14 @@ def scan_binance():
         if change_pct >= PUMP_THRESHOLD:
             send(
                 f"🚀 <b>PUMP</b>\n"
-                f"Binance — <b>{symbol}</b>\n"
+                f"<b>{symbol}</b>\n"
                 f"Изм.: <b>+{change_pct:.2f}%</b> за {WINDOW_MIN} мин\n"
                 f"Объём: ~{int(window_volume * now_price):,} USDT"
             )
         elif change_pct <= DUMP_THRESHOLD:
             send(
                 f"💥 <b>DUMP</b>\n"
-                f"Binance — <b>{symbol}</b>\n"
+                f"<b>{symbol}</b>\n"
                 f"Изм.: <b>{change_pct:.2f}%</b> за {WINDOW_MIN} мин\n"
                 f"Объём: ~{int(window_volume * now_price):,} USDT"
             )
@@ -107,6 +107,4 @@ def home():
 if __name__ == "__main__":
     time.sleep(2)
     t = threading.Thread(target=radar_loop)
-    t.daemon = True
-    t.start()
-    app.run(host="0.0.0.0", port=10000)
+    t.daemon =
